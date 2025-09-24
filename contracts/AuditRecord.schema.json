@@ -1,0 +1,19 @@
+{
+  "$id": "AuditRecord.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuditRecord",
+  "type": "object",
+  "required": ["ts", "action", "user", "proposal_id", "proposal_hash", "path", "result", "prev_record_hash", "record_hash"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "action": { "type": "string" },
+    "user": { "type": "string" },
+    "proposal_id": { "type": "string" },
+    "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "path": { "type": "string" },
+    "result": { "type": "string" },
+    "prev_record_hash": { "type": "string" },
+    "record_hash": { "type": "string" }
+  },
+  "additionalProperties": false
+}

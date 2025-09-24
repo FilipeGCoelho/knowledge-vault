@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProposalV1",
+  "type": "object",
+  "required": ["target_folder", "filename", "frontmatter", "changelog"],
+  "properties": {
+    "target_folder": { "type": "string" },
+    "filename": { "type": "string" },
+    "frontmatter": { "type": "object" },
+    "related_links": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "changelog": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "checks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

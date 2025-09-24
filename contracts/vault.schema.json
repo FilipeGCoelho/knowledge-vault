@@ -1,0 +1,18 @@
+{
+  "$id": "vault.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VaultEntry",
+  "type": "object",
+  "required": ["path", "title", "topic", "status", "tags", "mtime", "size", "content_hash"],
+  "properties": {
+    "path": { "type": "string" },
+    "title": { "type": "string" },
+    "topic": { "type": "string" },
+    "status": { "type": "string", "enum": ["draft", "in-progress", "review", "published", "archived"] },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "mtime": { "type": "integer", "minimum": 0 },
+    "size": { "type": "integer", "minimum": 0 },
+    "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

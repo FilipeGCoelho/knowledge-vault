@@ -1,0 +1,15 @@
+{
+  "$id": "ApplyReceipt.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApplyReceipt",
+  "type": "object",
+  "required": ["path", "proposal_hash", "written_at", "bytes", "content_hash"],
+  "properties": {
+    "path": { "type": "string" },
+    "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "written_at": { "type": "string", "format": "date-time" },
+    "bytes": { "type": "integer", "minimum": 0 },
+    "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

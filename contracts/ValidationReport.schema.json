@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ValidationReport",
+  "type": "object",
+  "required": ["status", "findings", "required_fixes", "tests_after_fix"],
+  "properties": {
+    "status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "required_fixes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "object" }
+      }
+    },
+    "tests_after_fix": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
