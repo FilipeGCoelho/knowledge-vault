@@ -1,23 +1,51 @@
 {
+  "$id": "https://kmv.local/schemas/ProposalV1.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ProposalV1",
   "type": "object",
-  "required": ["target_folder", "filename", "frontmatter", "changelog"],
+  "additionalProperties": false,
+  "required": ["version", "id", "target", "frontmatter", "body", "governance", "hash", "origin"],
   "properties": {
-    "target_folder": { "type": "string" },
-    "filename": { "type": "string" },
-    "frontmatter": { "type": "object" },
-    "related_links": {
-      "type": "array",
-      "items": { "type": "string" }
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 8, "pattern": "^[a-z0-9\\-]{8,}$" },
+    "origin": { "type": "string", "enum": ["prompt", "enhancement", "health_check"] },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_id", "path"],
+      "properties": {
+        "route_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^(?!.*\\.{2})(?!\\s)(?!.*\\s$)[^\\0]+\\.md$" }
+      }
     },
-    "changelog": {
-      "type": "array",
-      "items": { "type": "string" }
+    "frontmatter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "status"],
+      "properties": {
+        "title": { "type": "string", "minLength": 3 },
+        "status": { "type": "string", "enum": ["draft", "in-progress", "review", "published", "archived"] },
+        "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 24 },
+        "aliases": { "type": "array", "items": { "type": "string" }, "maxItems": 8 }
+      }
     },
-    "checks": {
-      "type": "array",
-      "items": { "type": "string" }
-    }
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_md"],
+      "properties": {
+        "content_md": { "type": "string", "minLength": 1 }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["related_links", "rationale"],
+      "properties": {
+        "related_links": { "type": "array", "items": { "type": "string" } },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   }
 }

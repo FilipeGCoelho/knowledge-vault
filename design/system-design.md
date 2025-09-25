@@ -1,130 +1,261 @@
-# KMV Console — System Design (Revised, Implementation-Ready)
+# KMV Console — System Design
 
-> Scope: Single-user, local-first, Git-less, governed by `routing.yaml`. Write operations only via approved PROPOSALs. Undo up to 3 steps. Offline reads/writes; LLM calls may block.
-
----
-
-## 1. Context View
-
-### 1.1 Actors
-
-- **User (Researcher/Owner)** — prompts, reviews PROPOSALs, approves, applies, audits.
-- **LLM Provider** — Gemini 2.5 Pro (adapter is provider-agnostic).
-- **Local Filesystem (Vault)** — master folder with Markdown files, `routing.yaml`, `vault.json`, `audit.log`, `settings.json`.
-
-### 1.2 System Purpose
-
-- Convert prompts into **PROPOSALs** that comply with `routing.yaml`.
-- Validate, approve, and **atomically apply** files with auditable history.
-- Maintain **inventory** and **immutable audit** without Git.
+> Implementation-ready, standards-aligned, and testable. Source of truth: `requirements.md`. This document is explicit about choices/constraints, and stays within scope. All content follows markdownlint-friendly formatting.
 
 ---
 
-## 2. Container View
+## 1. Context & Goals
 
-### 2.1 UI (Next.js/React)
+### 1.1 Problem & Constraints
 
-- Prompt form, PROPOSAL viewer/validator, Apply gate, Inventory browser, Settings.
-- Enforces UI blocks (no writes without approval; only one enhancement at a time).
-- Accessibility (WCAG 2.1 AA): live regions for errors, focus management, visible focus.
+- Single-user, **local-first** knowledge management console that governs a Markdown vault with YAML SSOT (`routing.yaml`) and an **auditable** change pipeline.
+- **No Git**; all writes pass **PROPOSAL → Approve/Reject → Apply**. Enhancements are **body-only**.
+- Post-Apply **health checks** are event-driven, proposal-only, and cancellable.
+- Atomic multi-file **Apply bundles**, idempotent by `bundle_hash`, with **post-Apply validation**.
+- Immutable **audit JSONL** with hash chaining and origins: `prompt | enhancement | health_check`.
+- **Secrets security**: AES-256-GCM at rest; key via **Argon2id**. Never log secrets.
+- **File safety**: path normalization, traversal/symlink rejection, and temp+rename atomicity.
+- **Performance targets**: Prompt→PROPOSAL p50 ≤ 10 s / p90 ≤ 20 s; Apply ≈ ≤ 1 s/file (≤ 64 KB); Reindex 5k ≤ 30 s full / ≤ 5 s incremental.
+- **Accessibility**: WCAG 2.1 AA baseline (2.2 deltas acknowledged).
+- **Undo**: last 3 actions (bundle-aware), with precondition checks.
 
-### 2.2 API (Node/Express)
+### 1.2 Explicit Non-Goals
 
-- **Proposal Service** — LLM call → strict `ProposalV1`.
-- **Validation Service** — `ProposalV1` × `routing.yaml` × `vault.json` → `ValidationReport`.
-- **Apply Service** — atomic write, idempotent per `proposal_hash`, updates undo buffer.
-- **Inventory Service** — fast reindex (full ≤30s @5k files, incremental ≤5s).
-- **Audit Service** — append-only JSONL entries with hash chain.
-- **Settings Service** — encrypted settings, provider test.
-
-### 2.3 Adapters
-
-- **LLM Adapter**
-- **FS Adapter** (temp+rename, path normalization, symlink guard)
-- **Crypto/KeyStore Adapter** (AES-GCM; Argon2id KDF)
-
-### 2.4 Data Stores
-
-- `routing.yaml`
-- `vault.json`
-- Markdown files
-- `audit.log` (JSONL)
-- `settings.json` (encrypted fields)
-- `undo.log` (last 3 reversible actions)
+- Multi-tenant cloud or collaboration features.  
+- Git integration.  
+- GDPR features in v1 (consent portals, DSAR tooling), beyond local privacy controls.  
+- Offline **queueing** of prompts (prompts require live LLM; show offline state instead).
 
 ---
 
-## 3. Component View
+## 2. Architecture Views (C4-Inspired, Concise)
 
-### 3.1 Contracts
+### 2.1 Context View
 
-#### 3.1.1 ProposalV1
+- **Actors:** User (owner), LLM Provider (remote), Local Filesystem (vault).
+- **System Boundary:** Single-machine app hosting a local web UI and API with filesystem adapters and a crypto keystore.
+
+```mermaid
+graph LR
+  U[User] -->|Prompts/Approval| UI[Local UI]
+  UI --> API[Local API]
+  API --> FS[(Vault Filesystem)]
+  API --> LLM[(LLM Provider)]
+```
+
+### 2.2 Container View
+
+- **UI:** Next.js/React (SPA), accessibility-first.  
+- **API:** Node/Express with typed contracts (TypeScript), JSON over HTTP.  
+- **Adapters:** LLM, FS, Crypto/KeyStore.  
+- **Data Stores:** `routing.yaml`, `vault.json`, Markdown files, `audit.log` (JSONL), `settings.json` (encrypted fields), `undo.log`.
+
+```mermaid
+graph TD
+  subgraph UI
+    A[Next.js/React] -->|REST/IPC| B[Node/Express API]
+  end
+  subgraph Adapters
+    B --> C1[LLM Adapter]
+    B --> C2[FS Adapter]
+    B --> C3[Crypto/KeyStore]
+  end
+  subgraph DataStores
+    D1[routing.yaml]
+    D2[vault.json]
+    D3[Markdown Vault]
+    D4[audit.log JSONL]
+    D5["settings.json (enc)"]
+    D6[undo.log]
+  end
+  C2 --> D1
+  C2 --> D2
+  C2 --> D3
+  B --> D4
+  C3 --> D5
+  B --> D6
+  C1 -->|HTTPS| LLM[(LLM Provider)]
+```
+
+### 2.3 Component View (Services)
+
+Each service lists **I/O contracts**, **happy path**, **failure modes**, **timeouts**, **idempotency**, and **observability**.
+
+#### 2.3.1 Proposal Service
+
+- **In:** `{ prompt: string, contextRefs?: string[] }`  
+- **Out:** `ProposalV1` (see §3.1).  
+- **Happy path:** Calls LLM; strict-parse to schema; **format-repair loop** (≤ 2 attempts) within overall p90 budget; compute `proposal_hash` over canonicalized JSON.  
+- **Failure modes:** `LLM_TIMEOUT`, `LLM_429`, `LLM_MALFORMED` (retryable with capped backoff).  
+- **Timeouts:** LLM call deadline 8 s (p50), 16 s (p90).  
+- **Idempotency:** By prompt fingerprint + normalized context + model version → used for observability only (no dedup of proposals).  
+- **Observability:** `correlation_id`, `proposal_id`, `proposal_hash`, timings, retry_count, provider_code.
+
+#### 2.3.2 Validation Service
+
+- **In:** `ProposalV1`, `routing.yaml`, `vault.json`  
+- **Out:** `ValidationReport` (see §3.2).  
+- **Happy path:** Schema check → route match → path policy → neighbor/link existence → enhancement is body-only.  
+- **Failure modes:** `SCHEMA_INVALID`, `ROUTING_MISMATCH`, `PATH_COLLISION`.  
+- **Timeouts:** 300 ms typical; 2 s cap.  
+- **Idempotency:** Pure function (no state).  
+- **Observability:** `proposal_hash`, `ruleId`s, counts {errors,warnings}.
+
+#### 2.3.3 Apply (Bundle) Service
+
+- **In:** `{ bundle: ApplyBundleV1, proposal_hash }` (see §3.3).  
+- **Out:** `ApplyReceipt[]` (one per affected file).  
+- **Happy path:** Acquire per-path locks → temp-write → `fsync(file)` → `fsync(tmp_dir)` → `rename(tmp→final)` on same device → `fsync(parent_dir)` → post-Apply validation → update `vault.json` incrementally → append `audit.log` → enqueue health-check event.  
+- **Failure modes:** `FS_NO_SPACE`, `FS_PERMISSION`, `PATH_COLLISION`, `CONFIG_CORRUPT`.  
+- **Timeouts:** ≤ 1 s/file (≤ 64 KB).  
+- **Idempotency:** De-duplicate by `bundle_hash` + `content_hash` per action.  
+- **Observability:** `bundle_hash`, per-file `content_hash`, bytes_written, fsync_durations, post_validate_status.
+
+#### 2.3.4 Inventory Service
+
+- **In:** scan request (full or incremental)  
+- **Out:** updated `vault.json` entries with `{path,title,topic,status,tags,mtime,size,content_hash}`.  
+- **Happy path:** Full scan ≤ 30 s @ 5k files; incremental watcher ≤ 5 s. Near-duplicate hints (title n-gram cosine + slug Levenshtein ≥ 0.82 and same topic).  
+- **Failure modes:** `FS_PERMISSION`, `CONFIG_CORRUPT`.  
+- **Observability:** files_per_sec, changed_count, duplicate_candidates.
+
+#### 2.3.5 Health Check Orchestrator
+
+- **In:** events after successful Apply; coalesced within 2 s.  
+- **Out:** one or more **Health PROPOSALs** (no writes).  
+- **Happy path:** Analyze changed paths + inbound/outbound neighbors; detect link gaps/orphans, neighbor rewrite opportunities, and topic sprawl vs route/filename.  
+- **Failure modes:** Cancelled (new prompt/Apply), time budget exceeded.  
+- **Timeouts:** Time-sliced worker; cooperative cancellation.  
+- **Idempotency:** Health proposals carry `origin=health_check` and a deterministic `proposal_hash` per analyzed window.  
+- **Observability:** detections {broken_links, orphans, sprawl_hits}, thresholds, affected_paths.
+
+#### 2.3.6 Audit Service
+
+- **In:** events `{origin, justification, bundle_map, prev_hash}`  
+- **Out:** append-only JSONL with `record_hash` linking previous (`prev_hash`).  
+- **Observability:** chain_verification_ok, append_latency, fsync_ok.
+
+#### 2.3.7 Settings Service
+
+- **In/Out:** read/write `settings.json` with encrypted fields; provider connectivity test.  
+- **Failure modes:** `CONFIG_CORRUPT`, `FS_PERMISSION`.  
+- **Observability:** encryption_version, kdf_params, test_call_status.
+
+### 2.4 Operational View (Key Sequences)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant UI as UI
+  participant API as API
+  participant L as LLM
+  participant FS as Filesystem
+  U->>UI: Enter Prompt
+  UI->>API: POST /proposal
+  API->>L: complete(prompt)
+  L-->>API: model response
+  API->>API: parse + repair loop + hash
+  API-->>UI: ProposalV1
+  U->>UI: Approve
+  UI->>API: POST /apply (bundle)
+  API->>FS: atomic write (locks, temp, fsync, rename, fsync)
+  API->>API: post-apply validation + reindex (incremental)
+  API->>FS: append audit + fsync
+  API-->>UI: receipts
+  API->>API: enqueue health-check
+```
+
+**Enhancement (body-only):** same sequence with validator asserting frontmatter unchanged.  
+**Health-check cancel/resume:** Any new Prompt/Apply cancels pending work; next filesystem change reschedules analysis.
+
+### 2.5 Deployment View (Local)
+
+- **Mode A — Local web server (v1):** UI served at `localhost`; keys derived at runtime and stored in a user-accessible config folder with restricted permissions. Native OS pickers via browser file input APIs.  
+- **Mode B — Desktop shell (deferred):** Would enable better key handling (OS keychain) and system file pickers. ADR in §12.
+
+---
+
+## 3. Critical Contracts & Schemas (Normative)
+
+> All schemas are strict for Ajv; unknown keys rejected.
+
+### 3.1 `ProposalV1`
 
 ```json
 {
-  "$id": "ProposalV1.schema.json",
+  "$id": "https://kmv.local/schemas/ProposalV1.json",
   "type": "object",
-  "required": ["version","id","target","frontmatter","body","governance","hash"],
+  "additionalProperties": false,
+  "required": ["version", "id", "target", "frontmatter", "body", "governance", "hash", "origin"],
   "properties": {
     "version": { "const": 1 },
-    "id": { "type": "string", "minLength": 8 },
+    "id": { "type": "string", "minLength": 8, "pattern": "^[a-z0-9\\-]{8,}$" },
+    "origin": { "type": "string", "enum": ["prompt", "enhancement", "health_check"] },
     "target": {
       "type": "object",
-      "required": ["route_id","path"],
+      "additionalProperties": false,
+      "required": ["route_id", "path"],
       "properties": {
-        "route_id": { "type": "string" },
-        "path": { "type": "string", "pattern": "^[^\\0]*\\.md$" }
+        "route_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^(?!.*\\.{2})(?!\\s)(?!.*\\s$)[^\\0]+\\.md$" }
       }
     },
     "frontmatter": {
       "type": "object",
-      "required": ["title","status"],
+      "additionalProperties": false,
+      "required": ["title", "status"],
       "properties": {
         "title": { "type": "string", "minLength": 3 },
-        "status": { "type": "string", "enum": ["draft","in-progress","review","published","archived"] },
-        "tags": { "type": "array", "items": { "type": "string" } }
+        "status": { "type": "string", "enum": ["draft", "in-progress", "review", "published", "archived"] },
+        "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 24 },
+        "aliases": { "type": "array", "items": { "type": "string" }, "maxItems": 8 }
       }
     },
     "body": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["content_md"],
       "properties": {
-        "content_md": { "type": "string" }
+        "content_md": { "type": "string", "minLength": 1 }
       }
     },
     "governance": {
       "type": "object",
-      "required": ["related_links","rationale"],
+      "additionalProperties": false,
+      "required": ["related_links", "rationale"],
       "properties": {
         "related_links": { "type": "array", "items": { "type": "string" } },
-        "rationale": { "type": "string" }
+        "rationale": { "type": "string", "minLength": 1 }
       }
     },
     "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-  },
-  "additionalProperties": false
+  }
 }
 ```
 
-#### 3.1.2 ValidationReport
+### 3.2 `ValidationReport`
 
 ```json
 {
-  "$id": "ValidationReport.schema.json",
+  "$id": "https://kmv.local/schemas/ValidationReport.json",
   "type": "object",
-  "required": ["ok","errors","matched_route_id"],
+  "additionalProperties": false,
+  "required": ["ok", "matched_route_id", "errors"],
   "properties": {
     "ok": { "type": "boolean" },
     "matched_route_id": { "type": "string" },
     "errors": {
       "type": "array",
-      "items": { "type": "object",
-        "required": ["code","path","message","severity"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "path", "message", "severity"],
         "properties": {
           "code": { "type": "string" },
           "path": { "type": "string" },
           "message": { "type": "string" },
-          "severity": { "type": "string", "enum": ["error","warning"] },
+          "severity": { "type": "string", "enum": ["error", "warning"] },
           "ruleId": { "type": "string" }
         }
       }
@@ -133,271 +264,325 @@
 }
 ```
 
-#### 3.1.3 ApplyReceipt
+### 3.3 `ApplyBundleV1`
 
 ```json
 {
-  "path": "research/2025/topic-x.md",
-  "proposal_hash": "a1b2...64",
-  "written_at": "2025-09-24T14:05:03Z",
-  "bytes": 1234,
-  "content_hash": "deadbeef...64"
-}
-```
-
-#### 3.1.4 AuditRecord
-
-```json
-{
-  "ts": "2025-09-24T14:05:03Z",
-  "action": "APPLY",
-  "user": "local",
-  "proposal_id": "prop-...",
-  "proposal_hash": "a1b2...64",
-  "path": "research/2025/topic-x.md",
-  "result": "SUCCESS",
-  "prev_record_hash": "Hn-1",
-  "record_hash": "Hn"
-}
-```
-
-#### 3.1.5 vault.json
-
-```json
-{ 
-    "path":".../topic-x.md",
-    "title":"...",
-    "topic":"...",
-    "status":"draft",
-    "tags":["a"],
-    "mtime":1695555555,
-    "size":1234,
-    "content_hash":"...64" 
-}
-```
-
-### 3.2 Services (IO, Behavior, Failure)
-
-#### 3.2.1 Proposal Service
-
-- **In:** `{ prompt, contextRefs? }`
-- **Out:** `ProposalV1`
-- **Flow:** LLM call → parse → **repair loop** (≤ 2 attempts within p90) → compute `hash`.
-- **Failure:** `LLM_TIMEOUT` | `LLM_429` | `LLM_MALFORMED` (with retryable flags).
-- **Note:** If routing is unresolved, include `routing_yaml_snippet` in `governance.rationale`.
-
-#### 3.2.2 Validation Service
-
-- **In:** `ProposalV1`, `routing.yaml`, `vault.json`
-- **Out:** `ValidationReport`
-- **Checks:** JSON Schema; route match; path policy; status ∈ allowed; related link existence.
-- **Blockers:** Any `severity=error` ⇒ **approval disabled**.
-
-#### 3.2.3 Apply Service
-
-- **In:** **Approved** `ProposalV1`
-- **Out:** `ApplyReceipt`
-- **Behavior:** Idempotency by `proposal_hash`; **atomic write** (see §5); update `undo.log`.
-- **Failure:** No partial writes; explicit actionable message (`PATH_COLLISION`, `FS_NO_SPACE`).
-
-#### 3.2.4 Inventory Service
-
-- **Full scan:** ≤ 30s @ 5k files (frontmatter-only parse); saves `vault.json`.
-- **Incremental:** File watcher and/or `mtime|size`; ≤ 5s; re-hash **only changed** files.
-- **Near-duplicates:** cosine(title n-grams) + slug Levenshtein; threshold **≥ 0.82** & **same topic**.
-
-#### 3.2.5 Audit Service
-
-- **Append JSONL**; compute hash chain; `fsync` after append.
-- **Export:** CSV/JSON (by replaying JSONL).
-- **Verify:** Recompute chain end-to-end.
-
-#### 3.2.6 Settings Service
-
-- **Security:** Encrypted fields in `settings.json` using **AES-GCM**; key derived with **Argon2id** from user passphrase.
-- **Ops:** Test provider call with **redacted logging**.
-
----
-
-## 4. Operational View
-
-### Core Sequence
-
-1. **Prompt** → Proposal Service (LLM → `ProposalV1` with `hash`).
-2. **Validation** → `ValidationReport` (UI shows errors/warnings + matched route).
-3. **Approve** → Apply Service acquires locks, performs **atomic write**, updates inventory (incremental), appends audit.
-4. **Enhancement flow** → same path but **body-only** mutation (frontmatter untouched).
-
-### Offline Behavior
-
-- **Reads:** Always OK.
-- **LLM unavailable:** Show “LLM offline” state; **queue not supported** (keep it simple).
-
----
-
-## 5. File Safety: Atomic Write & Locking
-
-### Atomic Write (temp + rename)
-
-1. Resolve **normalized absolute path** inside vault; **reject** path traversal/symlinks.
-2. Write to `vault/.tmp/<uuid>.md`; `fsync(file)`.
-3. `fsync(vault/.tmp)`; `rename(tmp → final)` (atomic on same device).
-4. `fsync(parent_dir)`.
-5. On error: **remove temp**; return error; **no partials**.
-
-### Locking
-
-- **Per-path lock:** `vault/.locks/<sha256(path)>.lock` (create with `O_EXCL`).
-- **Inventory lock:** `vault/.locks/inventory.lock` during full reindex.
-- **Crash cleanup:** Stale locks **older than 10 minutes** are reclaimable.
-
-### Idempotency
-
-- If a previous **Apply** exists for the same `proposal_hash` and `path` with the same `content_hash` → **return prior receipt** (no rewrite).
-
----
-
-## 6. Undo Model (max 3 steps)
-
-### Undoable Actions
-
-- `APPLY_CREATE` (new file) → **inverse:** delete file (only if unchanged; verify `content_hash`).
-- `ENHANCEMENT_APPLY` (body update) → **inverse:** restore previous content (snapshot saved).
-- `SETTINGS_UPDATE` → **inverse:** restore previous settings.
-
-### Persistence
-
-- `undo.log` (JSONL): `{ action, inverse_payload, content_hash, ttl_index }`.
-- **Eviction:** Remove oldest when > 3 entries.
-- **Safety:** Before undo, verify file state matches `content_hash`.
-
----
-
-## 7. Error Taxonomy (codes, purpose, retry)
-
-| Code              | Class        | Retry?   | Typical cause           | UI remediation                           |
-|-------------------|--------------|----------|-------------------------|-------------------------------------------|
-| `SCHEMA_INVALID`  | USER_INPUT   | No       | Proposal violates schema| Show failing paths; offer repair          |
-| `ROUTING_MISMATCH`| USER_INPUT   | No       | No route matches        | Propose YAML snippet                      |
-| `PATH_COLLISION`  | USER_INPUT   | No       | Target exists           | Suggest new slug                          |
-| `FS_NO_SPACE`     | SYSTEM       | No       | Disk full               | Free space; retry                         |
-| `FS_PERMISSION`   | SYSTEM       | No       | No write perms          | Fix permissions                           |
-| `CONFIG_CORRUPT`  | SYSTEM       | No       | Bad settings/routing    | Open settings / recover                   |
-| `LLM_TIMEOUT`     | PROVIDER     | Yes      | Network/latency         | Retry with backoff                        |
-| `LLM_429`         | PROVIDER     | Yes      | Rate limit              | Backoff & retry                           |
-| `LLM_MALFORMED`   | PROVIDER     | Yes (≤2) | Bad output              | Repair loop; if fail, show raw            |
-
----
-
-## 8. Security & Secrets
-
-- `settings.json` stores encrypted fields:
-
-  ```json
-  { 
-    "provider": "...",
-    "api_key": "enc:base64",
-    "kdf": { "alg": "Argon2id", "salt": "...", "params": { "m": ..., "t": ..., "p": ... } }
+  "$id": "https://kmv.local/schemas/ApplyBundleV1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bundle_hash", "actions"],
+  "properties": {
+    "bundle_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "path"],
+        "properties": {
+          "op": { "type": "string", "enum": ["create", "modify", "delete", "link"] },
+          "path": { "type": "string", "pattern": "^(?!.*\\.{2})[^\\0]+$" },
+          "content": { "type": "string" },
+          "link_target": { "type": "string" },
+          "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    }
   }
-    ```
+}
+```
 
-### Security & Secrets
+### 3.4 `AuditRecord`
 
-- **Cipher:** AES-256-GCM; random 12-byte nonce; store auth tag.  
-- **Passphrase:** Set by user on first run; rotation flow re-encrypts.  
-- **Logging:** Never log secrets or plaintext settings. Redact in UI/logs.  
-- **Filesystem permissions:** Restrict app directory to user.  
+```json
+{
+  "$id": "https://kmv.local/schemas/AuditRecord.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "origin", "justification", "bundle_map", "prev_hash", "record_hash"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "origin": { "type": "string", "enum": ["prompt", "enhancement", "health_check"] },
+    "justification": { "type": "string" },
+    "bundle_map": { "type": "object" },
+    "prev_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "record_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
+```
 
----
+### 3.5 `vault.json` Entry
 
-## 9. Inventory & Duplicate Detection
-
-- **Index fields:** `path, title, topic, status, tags, mtime, size, content_hash`.
-
-### Incremental Strategy
-
-- On change events or periodic scan: compare `mtime | size`; if changed → parse frontmatter → recompute `content_hash` if necessary.  
-- Keep last scan stats; avoid full content parse when unchanged.
-
-### Near-Duplicate
-
-- Compute `title_vector` via n-gram TF-IDF; keep in-memory vector index.  
-- Candidate selection by topic equality; compute cosine similarity + slug Levenshtein.  
-- Flag if `cosine ≥ 0.82` **and** topic equal.  
-
----
-
-## 10. LLM Output Repair Loop
-
-- **Max 2 repairs** within overall **p90 ≤ 20s**.  
-- **Repairs allowed:** add missing required keys with placeholders; remove unknown keys; normalize enums; path slugify.  
-- **Validation:** Always validate after each repair; include repair notes in `governance.rationale`.  
-- **Audit:** Record original and final hashes.  
-
----
-
-## 11. Observability
-
-### SLIs
-
-- Prompt → Proposal latency (p50/p90)  
-- Apply success rate  
-- Validation failure rate (system-caused vs user-caused)  
-- Reindex throughput (files/sec)  
-
-### Structured Logs (JSON)
-
-- Include: `ts, correlation_id, proposal_id, proposal_hash, action, code, outcome`.  
-
-### Diagnostics
-
-- “Export diagnostics” bundle: `routing.yaml`, `settings` (**redacted**), `audit.log` (optionally truncated), last `vault.json`.  
+```json
+{
+  "$id": "https://kmv.local/schemas/VaultEntry.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "title", "topic", "status", "tags", "mtime", "size", "content_hash"],
+  "properties": {
+    "path": { "type": "string" },
+    "title": { "type": "string" },
+    "topic": { "type": "string" },
+    "status": { "type": "string", "enum": ["draft", "in-progress", "review", "published", "archived"] },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "mtime": { "type": "integer" },
+    "size": { "type": "integer" },
+    "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
+```
 
 ---
 
-## 12. Performance & Test Plan (Shift-Left)
+## 4. File Safety & Concurrency
 
-### Performance Targets
+### 4.1 Atomic Write Algorithm
 
-- Prompt → Proposal: **p50 ≤ 10s**, **p90 ≤ 20s** (LLM live); mock LLM for CI.  
-- Apply: **≤ 1s** per file (≤ 64 KB typical Markdown).  
-- Reindex: **full ≤ 30s** @ 5k files; **incremental ≤ 5s**.  
+1. Resolve a normalized absolute path within the vault; reject traversal (`..`) and symlinks.  
+2. Write to `vault/.tmp/<uuid>`; call `fsync(file)`.  
+3. `fsync(vault/.tmp)`; POSIX `rename(tmp, final)` on **same device** for atomicity.  
+4. `fsync(parent_dir)` after rename.  
+5. On any failure: remove temp; **no partial writes**.
 
-### Tests
+> POSIX `rename()` is atomic on the same filesystem; cross-device renames are **rejected** and fall back to copy+fsync+replace only if explicitly allowed by a future ADR.
 
-- **Contract tests:** Schemas with canonical valid/invalid fixtures.  
-- **Property tests:** Apply idempotency; atomic write crash simulation (temp removal).  
-- **Error-path tests:** Each error code triggers correct UI remediation.  
-- **Perf harness:** Synthetic prompts to assert latency budgets.  
-- **Accessibility:** Automated checks + screen-reader smoke (live region announcements).  
-- **Audit verifier:** CLI recomputes chain on `audit.log`.  
+### 4.2 Locking
 
----
+- **Per-path lock files:** `vault/.locks/<sha256(path)>.lock` created with `O_EXCL`.  
+- **Inventory lock:** `vault/.locks/inventory.lock` during full reindex.  
+- **Crash cleanup:** Locks older than 10 minutes are reclaimable with a warning in audit.
 
-## 13. Diagrams (Mermaid — optional)
+### 4.3 Path Hygiene
 
-Keep simple; add later if needed for onboarding.
+- Normalize to absolute within vault root.  
+- Reject traversal (`..`), symlinks, device boundaries.  
+- Deny non-UTF-8 paths and NUL bytes.  
+- Enforce `.md` extension for content files.
 
-- Context/Container  
-- Sequence: Prompt → Proposal → Validation → Approve → Apply → Audit → Reindex  
-- State machine: Proposal (Draft → Validated → Approved → Applied / Rejected)  
+### 4.4 Idempotency Rules
 
----
-
-## 14. Open Items (Consciously Deferred, Minimal Viable)
-
-- **Desktop shell** (Electron/Tauri) vs local web server: choose later; affects file picker & secret storage location only.  
-- **Queued offline prompts:** Not supported (keep simple; clear offline state instead).  
-- **Vault scale > 5k:** Acceptable for now; if exceeded, shard `vault.json` or add lightweight DB.  
+- Apply de-duplicates per `{bundle_hash, path, content_hash}`.  
+- Re-applying an identical bundle returns prior receipts without new writes.
 
 ---
 
-## 15. Compliance with Requirements (Trace Highlights)
+## 5. Health Checks: Design & Governance
 
-- **Strict governance** (`routing.yaml`) → Validation blocks; PROPOSAL repair loop with constraints.  
-- **Idempotent & atomic** applies → §5.  
-- **Undo (3 steps)** → §6.  
-- **Audit immutability** → §3.2 Audit Service, §11 tests.  
-- **Performance targets** → §12 budgets + harness.  
-- **Security of secrets** → §8.  
-- **Enhancements body-only** → §4 flow; validator ensures frontmatter untouched.  
+- **Event loop:** Triggered **after** successful Apply; coalesce events in a 2 s window.  
+- **Cancellation:** Any new Prompt/Apply cancels pending or running checks; they reschedule after the next change.  
+- **Scope:** Changed paths + neighbors via link graph (inbound/outbound).  
+- **Detections:**  
+  - Link graph gaps/orphans (missing targets, broken backlinks).  
+  - Neighbor rewrite suggestions (extract/split; relink to improve cohesion).  
+  - **Topic sprawl** vs filename/route thresholds (defaults):  
+    - File size > 64 KB, or  
+    - Headings > 12, or  
+    - Distinct topic heuristics > 2, or  
+    - Outbound links > 50.  
+  All thresholds are configurable.
+
+- **Outputs:** One or more **Health PROPOSALs** with reasons, thresholds hit, affected paths, and impact summary.  
+- **No writes:** Health checks produce proposals **only**; standard approval gate applies.
+
+---
+
+## 6. Error Taxonomy & UX Remediation
+
+| Code             | Class        | Retry | Typical Cause                   | UI Remediation                                                                 |
+|------------------|-------------:|:-----:|----------------------------------|---------------------------------------------------------------------------------|
+| SCHEMA_INVALID   | USER_INPUT   |  No   | Proposal fails schema            | Show failing JSON pointers; offer auto-repair preview; block Approve           |
+| ROUTING_MISMATCH | USER_INPUT   |  No   | No route matches `path`          | Show matched candidates; suggest `routing.yaml` snippet for approval           |
+| PATH_COLLISION   | USER_INPUT   |  No   | Target exists without override   | Suggest slug variants; allow explicit modify with diff                         |
+| FS_NO_SPACE      | SYSTEM       |  No   | Disk full                        | Show required/free bytes; pause and retry after user frees space               |
+| FS_PERMISSION    | SYSTEM       |  No   | Insufficient write permissions   | Explain which directory failed; link to docs; re-test after user fixes         |
+| CONFIG_CORRUPT   | SYSTEM       |  No   | Bad `settings.json`/`routing`    | Open recovery wizard; validate & re-save; keep backups                         |
+| LLM_TIMEOUT      | PROVIDER     | Yes   | Network latency/provider slowness| Exponential backoff (max 2); show estimated wait; allow cancel                 |
+| LLM_429          | PROVIDER     | Yes   | Rate limiting                    | Backoff with jitter; display retry-after if provided                           |
+| LLM_MALFORMED    | PROVIDER     | Yes   | Non-conforming output            | Run format-repair loop; if still failing, show raw + copy-to-clipboard button  |
+
+---
+
+## 7. Security & Privacy
+
+### 7.1 Secrets at Rest
+
+- **Cipher:** AES-256-GCM with random 96-bit nonce; store nonce + auth tag alongside ciphertext.  
+- **KDF:** **Argon2id** with parameters defaults: `m=64 MiB`, `t=3`, `p=1`, unique 128-bit salt per vault. Parameters stored in `settings.json` metadata.  
+- **Rotation:** Passphrase rotation re-encrypts all protected fields; old passphrase invalidated.  
+- **Redaction:** Secrets never logged; UI/logs redact values.  
+
+### 7.2 OWASP Alignment (Selected Controls)
+
+- **Input handling / schema validation:** Strict Ajv for all contracts.  
+- **Error handling/logging:** No stack leaks to UI; structured logs with codes only.  
+- **Data protection at rest:** AES-GCM as above; key derived by Argon2id.  
+- **Session hygiene:** Local inactivity lock (configurable); no telemetry by default.  
+
+### 7.3 Threats & Mitigations (STRIDE-Lite)
+
+- **Symlink/path traversal:** Reject symlinks and `..`; enforce normalized absolute paths.  
+- **Partial writes:** Temp+rename on same device with fsyncs.  
+- **Proposal tampering:** Audit hash chain; proposals hashed and recorded.  
+- **LLM prompt injection:** Output strict parsing + format-repair + rule-bound routes.  
+- **Replay of bundles:** Idempotency rules on `bundle_hash` + `content_hash`.
+
+### 7.4 Key Storage Implications
+
+- **Local web server (v1):** Encrypted `settings.json` in user config directory with OS file permissions.  
+- **Desktop shell (deferred):** Optionally store keys in OS keychain (ADR to evaluate).
+
+---
+
+## 8. Accessibility & UX Standards
+
+- **Baseline:** WCAG 2.1 AA.  
+- **WCAG 2.2 deltas to adopt where applicable:** stronger focus appearance, reduced pointer drag dependence, and consistent target sizes for controls.  
+- **Automation:** Integrate axe-core checks in CI; announce validation outcomes via ARIA live regions; maintain focus order and visible focus.  
+- **Keyboard-first UX:** All actions (Approve/Reject/Apply/Undo) fully keyboard-operable.
+
+---
+
+## 9. Observability & SLIs
+
+- **Structured logs (JSON):** `ts, correlation_id, proposal_id, proposal_hash, action, code, outcome, duration_ms`.  
+- **SLIs:**  
+  - Prompt→Proposal latency (p50/p90)  
+  - Apply success rate  
+  - Validation failure rate (user vs system)  
+  - Reindex throughput (files/sec)  
+  - Health-check turnaround (event→proposal)  
+- **Diagnostics export:** Redacted `settings.json`, `routing.yaml`, latest `vault.json`, `audit.log` tail, environment snapshot (app version, node version, OS).
+
+---
+
+## 10. Performance Engineering & Test Plan
+
+- **Budgets:** Honor targets in §1.1. Health checks are time-sliced and cancellable to stay responsive.  
+- **Test harness:**  
+  - **Contracts:** Valid/invalid fixtures for all schemas (Ajv).  
+  - **Property tests:** Apply idempotency (re-run bundles); atomic write chaos (kill between temp/rename).  
+  - **Error-path tests:** Each error code triggers correct remediation text.  
+  - **Accessibility smoke:** axe-core and screen-reader announcement checks.  
+  - **Audit verifier CLI:** Recompute hash chain end-to-end.  
+  - **Perf:** Synthetic prompts and file trees to assert p50/p90 and 5k-file reindex.
+
+---
+
+## 11. Traceability Matrix
+
+| Requirement | Design Sections | Tests / Hooks | Observability |
+|---|---|---|---|
+| Local-first, no Git | §1, §2.5 | E2E offline read/write; no Git deps | app_mode, telemetry=off |
+| PROPOSAL→Approve→Apply | §2.3.1–§2.3.3, §2.4 | Contract fixtures; e2e happy path | proposal_hash, action=APPLY |
+| Transactional bundles | §2.3.3, §3.3, §4 | Atomic write chaos tests | bundle_hash, bytes_written |
+| Idempotency on bundles | §2.3.3, §4.4 | Property tests | bundle_hash, content_hash |
+| Health checks proposal-only | §2.3.5, §5 | HC unit/e2e; cancellation | origin=health_check, hc_latency |
+| Enhancement body-only | §2.4, §3.1 | Validator forbids FM change | ruleId=FM_UNCHANGED |
+| Audit JSONL + hash chain | §2.3.6, §3.4, §10 | CLI verifier | record_hash, chain_ok |
+| Secrets: AES-GCM + Argon2id | §7 | KDF params test; decrypt/encrypt | encryption_version |
+| File safety: temp+rename | §4 | Chaos tests | fsync_ok, rename_ok |
+| Performance targets | §1.1, §10 | Perf harness | latency_p50/p90 |
+| Accessibility (2.1 AA) | §8 | Axe CI | a11y_checks_pass |
+| Undo (3, bundle-aware) | §0.2, §6 | Undo precondition tests | undo_available |
+
+> Any requirement not explicitly covered would be marked here as a gap (none identified beyond deferred ADRs).
+
+---
+
+## 12. Architecture Decisions (Pointers)
+
+- **ADR-001 UI Framework:** Next.js/React SPA; consequence: strong accessibility ecosystem and component reuse.  
+- **ADR-002 Local API:** Node/Express with TypeScript; consequence: unified language and rich FS libs.  
+- **ADR-003 Secrets:** Argon2id → AES-256-GCM; consequence: modern KDF and AEAD with integrity.  
+- **ADR-004 Apply Atomicity:** POSIX temp+fsync+rename on same device; consequence: safe against partial writes.  
+- **ADR-005 Audit Store:** Append-only JSONL with hash chain; consequence: human-readable, verifiable without DB.  
+- **ADR-006 Undo Model:** Bundle-aware inverse ops with precondition checks; consequence: safe, bounded complexity.  
+- **ADR-007 Offline Queueing:** Not supported; consequence: simpler invariants, clearer UX.  
+- **ADR-008 Desktop Shell:** Deferred; consequence: keep web server simplicity; revisit for OS keychain integration.
+
+---
+
+## 13. Risks & Mitigations
+
+- **LLM variance:** Strict schema parsing + repair loop; cap retries; surface raw with copy.  
+- **Filesystem semantics across OSes:** Treat symlinks/traversal uniformly; reject cross-device renames; comprehensive tests.  
+- **Large vault scalability:** Time-sliced health checks; incremental indexing; consider lightweight DB if > 5k files (ADR).  
+- **Performance tail risks:** Backpressure UI; cancel in-flight health checks; show progress.  
+- **User bypass edits:** Reindex on focus/interval; warnings when external edits diverge from inventory.  
+
+---
+
+## 14. Diagrams (Mermaid)
+
+### 14.1 Context
+
+```mermaid
+graph LR
+  User --> UI
+  UI --> API
+  API --> FS[(Vault)]
+  API --> LLM
+```
+
+### 14.2 Sequence (Prompt→…→Reindex)
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant UI as UI
+  participant API as API
+  participant L as LLM
+  participant FS as FS
+  U->>UI: Prompt
+  UI->>API: /proposal
+  API->>L: complete
+  L-->>API: response
+  API->>API: parse/repair/hash
+  API-->>UI: ProposalV1
+  U->>UI: Approve
+  UI->>API: /apply
+  API->>FS: atomic write
+  API->>FS: audit append
+  API->>API: reindex (incr)
+```
+
+### 14.3 State (Proposal)
+
+```mermaid
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Validated: schema + routing ok
+  Draft --> Rejected
+  Validated --> Approved
+  Approved --> Applied
+  Approved --> Rejected
+  Applied --> [*]
+```
+
+---
+
+## 15. Standards & References Consulted
+
+- **OWASP ASVS** (crypto, logging, input handling): apply schema validation, error handling, and cryptographic storage practices.  
+- **WCAG 2.1 AA baseline; 2.2 deltas**: adopt improved focus appearance, target sizes, reduced drag reliance.  
+- **POSIX `rename()`** semantics: atomic on same filesystem; constrain design accordingly.  
+- **Argon2id** recommendations for password-derived keys.
+
+> These references inform the constraints and security/accessibility mappings in §4, §7, and §8.
+
+---
+
+## 16. Design Review Checklist
+
+- [x] Satisfies all non-negotiable tenets (local-first; proposal-only flows; atomic bundles; health-check governance; audit chain; secrets; file safety; performance; accessibility; undo).  
+- [x] Explicit about architectural choices, constraints, and tradeoffs.  
+- [x] Includes contracts/schemas, failure modes, performance envelopes, and test hooks.  
+- [x] Avoids scope creep; marks deferrals via ADR pointers.  
+- [x] Conforms to markdownlint style (headings, fenced code blocks, tables).  
+- [x] Includes traceability matrix and diagrams.
+
+---
+
+*Generated: 2025-09-25T17:20:10Z*

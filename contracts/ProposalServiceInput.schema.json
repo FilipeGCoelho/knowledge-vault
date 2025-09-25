@@ -1,16 +1,12 @@
 {
-  "$id": "ProposalServiceInput.schema.json",
+  "$id": "https://kmv.local/schemas/ProposalServiceInput.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ProposalServiceInput",
   "type": "object",
+  "additionalProperties": false,
   "required": ["prompt"],
   "properties": {
-    "prompt": { "type": "string" },
-    "contextRefs": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Optional references to context notes or files."
-    }
-  },
-  "additionalProperties": false
+    "prompt": { "type": "string", "minLength": 1 },
+    "contextRefs": { "type": "array", "items": { "type": "string" } }
+  }
 }

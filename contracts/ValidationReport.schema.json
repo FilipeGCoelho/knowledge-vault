@@ -1,28 +1,55 @@
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ValidationReport",
-  "type": "object",
-  "required": ["status", "findings", "required_fixes", "tests_after_fix"],
-  "properties": {
-    "status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
-    "summary": { "type": "string" },
-    "findings": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "array",
-        "items": { "type": "string" }
-      }
-    },
-    "required_fixes": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "array",
-        "items": { "type": "object" }
-      }
-    },
-    "tests_after_fix": {
-      "type": "array",
-      "items": { "type": "string" }
-    }
-  }
+{{
+
+  "$id": "https://kmv.local/schemas/ValidationReport.json",  "$schema": "http://json-schema.org/draft-07/schema#",
+
+  "$schema": "http://json-schema.org/draft-07/schema#",  "title": "ValidationReport",
+
+  "title": "ValidationReport",  "type": "object",
+
+  "type": "object",  "required": ["status", "findings", "required_fixes", "tests_after_fix"],
+
+  "additionalProperties": false,  "properties": {
+
+  "required": ["ok", "matched_route_id", "errors"],    "status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
+
+  "properties": {    "summary": { "type": "string" },
+
+    "ok": { "type": "boolean" },    "findings": {
+
+    "matched_route_id": { "type": "string" },      "type": "object",
+
+    "errors": {      "additionalProperties": {
+
+      "type": "array",        "type": "array",
+
+      "items": {        "items": { "type": "string" }
+
+        "type": "object",      }
+
+        "additionalProperties": false,    },
+
+        "required": ["code", "path", "message", "severity"],    "required_fixes": {
+
+        "properties": {      "type": "object",
+
+          "code": { "type": "string" },      "additionalProperties": {
+
+          "path": { "type": "string" },        "type": "array",
+
+          "message": { "type": "string" },        "items": { "type": "object" }
+
+          "severity": { "type": "string", "enum": ["error", "warning"] },      }
+
+          "ruleId": { "type": "string" }    },
+
+        }    "tests_after_fix": {
+
+      }      "type": "array",
+
+    }      "items": { "type": "string" }
+
+  }    }
+
+}  }
+
 }
