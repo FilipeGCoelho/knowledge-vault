@@ -8,22 +8,23 @@ The purpose is to avoid re-litigating the same questions, and to keep design cho
 
 ## ADR-001: UI Framework — Next.js/React
 
-**Context**  
+### Context
 
 - The UI must render structured forms, validation errors, modals, and inventory browsers.  
 - Strong ecosystem needed for accessibility (WCAG 2.1 AA), component libraries, and developer tooling.  
 - The app may later become a desktop shell (Electron/Tauri), which benefits from React portability.
 
-**Decision**  
+### Decision
+
 Adopt **Next.js with React** for the UI layer.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - Vue.js: simpler learning curve but weaker ecosystem for form-heavy enterprise tooling.  
 - Svelte: lightweight but less mature ecosystem.  
 - Plain React (without Next.js): lacks routing & SSR out of the box, less opinionated structure.
 
-**Consequences**  
+### Consequences
 
 - ✅ Rich ecosystem, easy integration with validation libraries and accessibility testing.  
 - ✅ Path to Electron/Tauri reuse.  
@@ -34,20 +35,21 @@ Adopt **Next.js with React** for the UI layer.
 
 ## ADR-002: API Layer — Node.js/Express
 
-**Context**  
+### Context
 
 - The system requires a lightweight API layer between UI and local filesystem.  
 - Needs to call external LLM APIs, validate outputs, and manage apply/audit operations.
 
-**Decision**  
+### Decision
+
 Adopt **Node.js with Express** for the API layer.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - Python FastAPI: strong schema validation, but adds dual-runtime complexity (Node + Python).  
 - Go: efficient, but ecosystem mismatch with chosen UI stack and higher complexity for file adapters.
 
-**Consequences**  
+### Consequences
 
 - ✅ Unified JavaScript stack (front + back).  
 - ✅ Strong middleware ecosystem.  
@@ -55,22 +57,48 @@ Adopt **Node.js with Express** for the API layer.
 
 ---
 
+## ADR-002a: API Layer — TypeScript Adoption
+
+### Context
+
+- The API layer (Node.js/Express) benefits from strict typing and maintainable code structure.  
+- JavaScript alone is error-prone for complex logic and contract enforcement.
+
+### Decision
+
+Adopt **TypeScript** for all API layer code.
+
+### Alternatives Considered**
+
+- Plain JavaScript: faster prototyping, but lacks type safety and structure.  
+- Flow: less popular, weaker ecosystem.
+
+### Consequences
+
+- ✅ Enforces structured logic and contract validation.  
+- ✅ Early detection of type errors and mismatches.  
+- ✅ Improved maintainability and refactor safety.  
+- ❌ Slightly steeper learning curve for contributors unfamiliar with TypeScript.
+
+---
+
 ## ADR-003: LLM Provider Abstraction
 
-**Context**  
+### Context
 
 - Primary provider is Gemini 2.5 Pro, but future portability to OpenAI, Anthropic, etc. is expected.  
 - Avoid lock-in at service layer.
 
-**Decision**  
+### Decision
+
 Create an **LLM Adapter interface**, with Gemini as the default implementation.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - Directly coding to Gemini SDK.  
 - Using a third-party wrapper (LangChain, etc.), which adds complexity and lock-in.
 
-**Consequences**  
+### Consequences
 
 - ✅ Provider-agnostic design.  
 - ✅ Easy swap in future without large refactors.  
@@ -80,22 +108,23 @@ Create an **LLM Adapter interface**, with Gemini as the default implementation.
 
 ## ADR-004: Secrets Management — AES-GCM with Argon2id
 
-**Context**  
+### Context
 
 - The system stores API keys and settings locally in `settings.json`.  
 - Needs strong encryption with integrity/authentication.  
 - Passphrase must be user-provided, not hardcoded.
 
-**Decision**  
+### Decision
+
 Encrypt sensitive fields with **AES-256-GCM**, key derived via **Argon2id** KDF.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - ChaCha20-Poly1305: good option, but AES-GCM has wider library support in Node.  
 - PBKDF2: weaker against GPU attacks compared to Argon2id.  
 - No encryption: rejected (too risky, even for local apps).
 
-**Consequences**  
+### Consequences
 
 - ✅ Strong protection of API keys at rest.  
 - ✅ Integrity/authentication via GCM tag.  
@@ -106,21 +135,22 @@ Encrypt sensitive fields with **AES-256-GCM**, key derived via **Argon2id** KDF.
 
 ## ADR-005: Audit Log — JSONL with Hash Chaining
 
-**Context**  
+### Context
 
 - All actions must be auditable and tamper-evident.  
 - Needs to be lightweight, append-only, and human-inspectable.
 
-**Decision**  
+### Decision
+
 Store audit log in **JSONL format** with **hash chaining** between entries.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - SQLite DB: heavier, introduces schema migrations.  
 - Git-based history: out of scope (Git excluded).  
 - Plain text logs: no tamper evidence.
 
-**Consequences**  
+### Consequences
 
 - ✅ Append-only, easy to export/verify.  
 - ✅ Tamper-evidence without requiring external DB.  
@@ -130,22 +160,23 @@ Store audit log in **JSONL format** with **hash chaining** between entries.
 
 ## ADR-006: File System Writes — Local-First, Atomic, No Git
 
-**Context**  
+### Context
 
 - Scope excludes Git integration for now.  
 - Reliability requires no partial writes and no silent overwrites.
 
-**Decision**  
+### Decision
+
 Implement **atomic writes with temp+rename** inside the vault.  
 Restrict writes to Apply-only flow.  
 Skip Git for MVP.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - Git staging/commits: adds complexity, out of scope.  
 - Direct writes without atomicity: unsafe.
 
-**Consequences**  
+### Consequences
 
 - ✅ Simpler, reliable, local-only design.  
 - ✅ Matches MVP scope.  
@@ -156,20 +187,21 @@ Skip Git for MVP.
 
 ## ADR-007: Undo Model — Limited (Last 3 Actions)
 
-**Context**  
+### Context
 
 - The system must support rolling back mistakes, but without full versioning overhead.  
 - Undo is a usability requirement, not a full VCS.
 
-**Decision**  
+### Decision
+
 Provide **undo log** with maximum 3 reversible actions (`APPLY_CREATE`, `ENHANCEMENT_APPLY`, `SETTINGS_UPDATE`).
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - Infinite undo via Git or DB.  
 - No undo at all.
 
-**Consequences**  
+### Consequences
 
 - ✅ Simple, bounded complexity.  
 - ✅ Covers user error in the short term.  
@@ -179,20 +211,21 @@ Provide **undo log** with maximum 3 reversible actions (`APPLY_CREATE`, `ENHANCE
 
 ## ADR-008: Offline Mode — Reads OK, No Queueing
 
-**Context**  
+### Context
 
 - App must function offline for vault browsing.  
 - LLM calls require internet; queueing would complicate UX/state management.
 
-**Decision**  
+### Decision
+
 Support **offline reads/writes**, but **no prompt queueing** for offline LLM usage.
 
-**Alternatives Considered**  
+### Alternatives Considered
 
 - Queue prompts and auto-send when back online (complex).  
 - Hard-fail everything when offline.
 
-**Consequences**  
+### Consequences
 
 - ✅ Simple, predictable UX.  
 - ✅ No hidden state or retries.  

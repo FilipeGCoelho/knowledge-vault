@@ -2,7 +2,6 @@
 
 _Local-first LLM-assisted research console with governed Markdown vaults, strict YAML routing, atomic writes, and immutable audit logs._
 
----
 
 ## Table of Contents
 
@@ -15,8 +14,6 @@ _Local-first LLM-assisted research console with governed Markdown vaults, strict
   - [Prerequisites](#prerequisites)
   - [Install](#install)
   - [First Run](#first-run)
-
----
 
 ## Overview
 
@@ -31,7 +28,6 @@ _Local-first LLM-assisted research console with governed Markdown vaults, strict
 > Workflow: **Research → PROPOSAL → Approve/Reject → Apply**.  
 > Only approved PROPOSALs can write to disk. No arbitrary edits.
 
----
 
 ## Core Concepts
 
@@ -41,7 +37,6 @@ _Local-first LLM-assisted research console with governed Markdown vaults, strict
 - **Inventory**: `vault.json` index (path/title/topic/status/tags/mtime/size/hash).
 - **Audit**: Append-only JSON Lines log with hash chaining for tamper evidence.
 
----
 
 ## Features
 
@@ -55,7 +50,6 @@ _Local-first LLM-assisted research console with governed Markdown vaults, strict
 - ✅ **Accessibility**: WCAG 2.1 AA intentions (live regions, focus management, contrast)
 - ✅ **Provider-agnostic LLM** (Gemini 2.5 Pro by default; adapter pattern)
 
----
 
 ## Architecture (at a glance)
 
@@ -70,7 +64,6 @@ _Local-first LLM-assisted research console with governed Markdown vaults, strict
 - **Adapters**: LLM Adapter, FS Adapter (safe I/O), Crypto/KeyStore.
 - **Data**: Markdown files, `routing.yaml`, `vault.json`, `audit.log`, `settings.json`, `undo.log`.
 
----
 
 ## Performance & Quality Targets
 
@@ -81,7 +74,6 @@ _Local-first LLM-assisted research console with governed Markdown vaults, strict
 - **Quality**: ≤ **1%** rejected writes due to schema violations
 - **Safety**: 0 critical incidents of structure drift/unauthorized writes
 
----
 
 ## Getting Started
 
@@ -114,3 +106,66 @@ On first launch you will:
 2. Set an encryption passphrase (for secrets).
 3. Provide an LLM API key (Gemini by default).
 4. Offline behavior: reads/writes OK; LLM calls will be blocked with a clear “LLM offline” state (no queue)
+
+---
+
+## Example Contract Payloads
+
+Below are example payloads for key service contracts. These help developers understand expected request/response formats and support schema validation:
+
+### ProposalV1
+
+```json
+{
+  "title": "Add new research note",
+  "path": "notes/2025-09-25-llm-research.md",
+  "topic": "LLM Research",
+  "tags": ["llm", "research"],
+  "status": "draft",
+  "content": "---\ntitle: LLM Research\ntags: [llm, research]\n---\n...note body..."
+}
+```
+
+### ValidationReport
+
+```json
+{
+  "proposalPath": "notes/2025-09-25-llm-research.md",
+  "valid": true,
+  "errors": []
+}
+```
+
+### ApplyReceipt
+
+```json
+{
+  "applied": true,
+  "hash": "abc123...",
+  "timestamp": "2025-09-25T12:34:56Z"
+}
+```
+
+### AuditRecord
+
+```json
+{
+  "action": "APPLY_CREATE",
+  "user": "filipe-coelho",
+  "timestamp": "2025-09-25T12:34:56Z",
+  "hash": "abc123...",
+  "prevHash": "def456..."
+}
+```
+
+---
+
+## Update Policy & Documentation Sync
+
+Whenever contracts, routing.yaml, or business logic change, update the README, design docs (ADRs, requirements, system-design), and contract schemas in lockstep. This ensures:
+
+- Developer onboarding remains frictionless
+- Schema validation is always up to date
+- Governance and auditability are preserved
+
+> **Note:** The SSOT (`routing.yaml`) governs all structure and validation. Any drift between documentation, contracts, and implementation must be resolved immediately.
