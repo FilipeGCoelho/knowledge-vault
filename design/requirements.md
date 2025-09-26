@@ -37,6 +37,7 @@ The workflow is **Research → PROPOSAL → Approve/Reject → Apply**, keeping 
 * Audit log for all actions.  
 * Error/exception handling across all features, with rollback where possible.  
 * Undo capability for up to 3 actions backwards.  
+* **Prompt Refinement**: pre-proposal step to transform a learning goal into a structured study plan and refined prompt (no writes).  
 * **Health checks**: validate file cohesion, linking, topic boundaries, and file-to-file balance.  
 
 ### Out of Scope (Explicit)
@@ -64,8 +65,28 @@ The workflow is **Research → PROPOSAL → Approve/Reject → Apply**, keeping 
 * As a User, I want the system to block any action that violates `routing.yaml` and to propose paste-ready YAML when rules are missing.  
 * As a User, I want to review history and diffs for prompts, PROPOSALs, approvals, and applies.  
 * As a User, I want the system to execute **health checks** after vault modifications, producing PROPOSALs to correct structural drift, broken links, or files becoming multi-topic repositories.  
+* As a User, I want to refine my initial goal into a structured plan and a higher-quality prompt before generating proposals, to optimize learning structure and note placement.  
 
 ### 3.2 Detailed Feature List & Acceptance Criteria
+
+#### F0 — Prompt Refinement (Enhanced)
+
+* **Description:** Before generating a PROPOSAL, run a Prompt Refinement Service (PRS) to transform the raw learning goal into a structured Study Plan (StudyPlanV1) and a Refined Prompt (RefinedPromptV1). PRS outputs are advisory; no vault writes occur during refinement.  
+* **Scope:** Applies to learning goals in any topic; uses the curriculum-architect template; results are consumed by the Proposal Service when a draft is created.  
+* **Inputs:** `PromptRefinementInput` (goal, optional contextRefs, lensWeights).  
+* **Outputs:** `RefinedPromptV1` and `StudyPlanV1`; optional `routing_suggestions` per module for later drafting of PROPOSALs.  
+* **Lifecycle:** Stateless refinement with a two-repair format loop (repair attempts capped at 2); results are hashed for audit traceability.  
+* **Endpoints / Interfaces:** Expose PRS via POST `/refine` returning { refinedPrompt: RefinedPromptV1, studyPlan: StudyPlanV1 }.  
+* **Data Models:** See contracts/PromptRefinementInput.schema.json, contracts/RefinedPromptV1.schema.json, contracts/StudyPlanV1.schema.json. PRS stores no data in vault; only ephemeral in memory/logs.  
+* **Validation & Quality:** Validate outputs against the strict schemas; if validation fails, provide actionable repair guidance; on second failure, return error with details.  
+* **Weights & Lenses:** Weights for Tutor/Publisher/Student influence the refined output; persisted in RefinedPromptV1 for audit and reproducibility.  
+* **Observability & Metrics:** refinement_latency_ms, plan_size_chars, refined_text_size, weights_distribution, refinement_success_rate.  
+* **Security:** refinement is ephemeral; ensure redaction for any logs; no secrets stored by PRS.  
+* **Testing & Quality Assurance:** unit tests for input validation and repair logic; integration tests for /refine flow; performance tests to meet latency budgets; accessibility considerations in the refinement UI.  
+* **Governance & Auditing:** All refinement events are logged with origin=refinement in the Audit log; the refinement chain is auditable and traceable to the final Proposal.  
+* **UI/UX:** Two-pane interface for refining goals (Study Plan on the left, Refined Prompt on the right); controls to adjust weights, re-run refinement, and preview routing suggestions; no write actions until user approves the resulting Proposal.  
+
+* **Rationale:** This enhancement increases data organization quality, improves prompt quality for LLM experimentation, and reduces cognitive load by pre-structuring learning goals into actionable study plans.
 
 #### F1 — Prompt → PROPOSAL
 
@@ -201,6 +222,7 @@ The workflow is **Research → PROPOSAL → Approve/Reject → Apply**, keeping 
 
 #### Must
 
+* F0 Prompt Refinement  
 * F1 Prompt→PROPOSAL  
 * F2 PROPOSAL Validator  
 * F3 Apply (multi-file safe)  
@@ -269,4 +291,4 @@ The workflow is **Research → PROPOSAL → Approve/Reject → Apply**, keeping 
 
 * **Stack:** Next.js (UI), Node/Express (API), filesystem adapter, provider SDK (Gemini), optional Python indexer.  
 * **KMV owns scripts:** The app ships inventory & Apply logic; users only run the app—no manual scripting required.  
-* **No silent improvisation:** Every action re-reads `routing.yaml`; missing rules → PROPOSAL.  
+* **No silent improvisation:** Every action re-reads `routing.yaml`; missing rules → PROPOSAL.

@@ -12,7 +12,7 @@
 - **No Git**; all writes pass **PROPOSAL → Approve/Reject → Apply**. Enhancements are **body-only**.
 - Post-Apply **health checks** are event-driven, proposal-only, and cancellable.
 - Atomic multi-file **Apply bundles**, idempotent by `bundle_hash`, with **post-Apply validation**.
-- Immutable **audit JSONL** with hash chaining and origins: `prompt | enhancement | health_check`.
+- Immutable **audit JSONL** with hash chaining and origins: `prompt | refinement | enhancement | health_check`.
 - **Secrets security**: AES-256-GCM at rest; key via **Argon2id**. Never log secrets.
 - **File safety**: path normalization, traversal/symlink rejection, and temp+rename atomicity.
 - **Performance targets**: Prompt→PROPOSAL p50 ≤ 10 s / p90 ≤ 20 s; Apply ≈ ≤ 1 s/file (≤ 64 KB); Reindex 5k ≤ 30 s full / ≤ 5 s incremental.
@@ -80,6 +80,34 @@ graph TD
 ### 2.3 Component View (Services)
 
 Each service lists **I/O contracts**, **happy path**, **failure modes**, **timeouts**, **idempotency**, and **observability**.
+
+#### 2.3.0 Prompt Refinement Service
+
+- **In:** `PromptRefinementInput` (goal, optional contextRefs, lens weights).  
+- **Out:** `RefinedPromptV1` and `StudyPlanV1` (no writes).  
+- **Happy path:** Apply the curriculum-architect template; strict-parse outputs; format-repair loop (≤ 2); return structured plan and refined prompt.  
+- **Failure modes:** `LLM_TIMEOUT`, `LLM_429`, `LLM_MALFORMED`.  
+- **Timeouts:** 8 s (p50) / 16 s (p90).  
+- **Idempotency:** Deterministic by `{goal, weights, template_version}` hash for observability only.  
+- **Observability:** `refinement_latency`, `plan_size`, `weights`.
+
+#### 2.3.0 Prompt Refinement Service – Detailed Specification
+
+- Purpose: Pre-proposal refinement that converts a raw learning goal into a structured StudyPlanV1 and RefinedPromptV1 for upstream Proposal generation.
+- Scope: Runs before Proposal service; does not write to vault; outputs are advisory only.
+- Input: PromptRefinementInput (goal, contextRefs, lensWeights) as defined in contracts.
+- Outputs: RefinedPromptV1 and StudyPlanV1 as defined in contracts; optional module routing_suggestions.
+- Lifecycle: Stateless; two repair attempts max; deterministic output via input hash and templateVersion.
+- Endpoints: POST /refine returns { refinedPrompt: RefinedPromptV1, studyPlan: StudyPlanV1 }.
+- DataModels: See contracts/PromptRefinementInput.schema.json, RefinedPromptV1.schema.json, StudyPlanV1.schema.json.
+- Validation: Outputs validated against strict schemas; if validation fails, provide repair guidance; on second failure, report error.
+- Weights/Lenses: Weights influence refinement output; persisted for audit.
+- Observability: metrics refine_latency_ms, plan_size_chars, refined_text_size, weights_distribution, success_rate.
+- Security: ephemeral results; do not persist in vault; redact sensitive fields in logs.
+- UI/UX: Two-pane UI (Study Plan left, Refined Prompt right) with weights sliders and a review step before Proposal generation.
+- Governance: refinement events logged with origin=refinement in Audit; linked to subsequent Proposal.
+- Testing: unit tests for input validation and repair; integration tests for /refine flow; performance testing to meet budgets.
+- Cross-links: reference to contracts for PromptRefinementInput, RefinedPromptV1, StudyPlanV1.
 
 #### 2.3.1 Proposal Service
 
@@ -166,8 +194,22 @@ sequenceDiagram
   API->>API: enqueue health-check
 ```
 
-**Enhancement (body-only):** same sequence with validator asserting frontmatter unchanged.  
-**Health-check cancel/resume:** Any new Prompt/Apply cancels pending work; next filesystem change reschedules analysis.
+Optional pre-step (Refinement):
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant UI as UI
+  participant API as API
+  participant L as LLM
+  U->>UI: Enter Learning Goal
+  UI->>API: POST /refine (goal, weights)
+  API->>L: curriculum-architect template
+  L-->>API: plan + refined prompt
+  API-->>UI: StudyPlanV1 + RefinedPromptV1
+  U->>UI: Approve refinement / adjust weights
+  UI->>API: POST /proposal (refined_text)
+```
 
 ### 2.5 Deployment View (Local)
 
@@ -180,7 +222,120 @@ sequenceDiagram
 
 > All schemas are strict for Ajv; unknown keys rejected.
 
-### 3.1 `ProposalV1`
+### 3.0 Prompt Refinement Contracts
+
+#### 3.0.1 `PromptRefinementInput`
+
+```json
+{
+  "$id": "https://kmv.local/schemas/PromptRefinementInput.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["goal"],
+  "properties": {
+    "goal": { "type": "string", "minLength": 8 },
+    "contextRefs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 8
+    },
+    "lensWeights": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-zA-Z0-9_\\-]{2,32}$": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}
+```
+
+Field semantics — PromptRefinementInput
+
+- goal: Human-stated learning objective. Must be specific enough to scope the plan; min 8 chars. Producer: user. Consumer: Prompt Refinement Service (PRS). Used to seed the curriculum template.
+- contextRefs: Optional anchor materials (vault-relative note paths or external URIs) that the PRS may consult or reference. Capped to 8 to reduce drift and latency.
+- lensWeights: Objective weightings per lens key (e.g., tutor, publisher, student). Values ∈ [0,1]; UI should normalize to sum≈1 though schema does not enforce sum. Used to bias the refinement output.
+
+#### 3.0.2 `RefinedPromptV1`
+
+```json
+{
+  "$id": "https://kmv.local/schemas/RefinedPromptV1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "goal", "refinedText", "weights", "templateVersion"],
+  "properties": {
+    "version": { "const": 1 },
+    "goal": { "type": "string", "minLength": 8 },
+    "refinedText": { "type": "string", "minLength": 8 },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-zA-Z0-9_\\-]{2,32}$": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "templateVersion": { "type": "string", "minLength": 1 }
+  }
+}
+```
+
+Field semantics — RefinedPromptV1
+
+- version: Contract version pin for forward-compat checks. Must equal 1.
+- goal: Echo of the original learning objective (post-cleanup), for traceability and audit diffs.
+- refinedText: Final LLM-facing prompt text, shaped by the study plan and lens weights. This is passed to Proposal Service.
+- weights: Effective lens weights used to produce this refined prompt. Persisted for audit and reproducibility.
+- templateVersion: Identifier of the refinement recipe/template used (e.g., curriculum-architect-v1) to ensure reproducibility.
+
+#### 3.0.3 `StudyPlanV1`
+
+```json
+{
+  "$id": "https://kmv.local/schemas/StudyPlanV1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "goal", "modules"],
+  "properties": {
+    "version": { "const": 1 },
+    "goal": { "type": "string", "minLength": 8 },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "description", "topics", "resources"],
+        "properties": {
+          "title": { "type": "string", "minLength": 3 },
+          "description": { "type": "string", "minLength": 8 },
+          "topics": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "resources": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "maxItems": 12
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Field semantics — StudyPlanV1
+
+- version: Contract version pin; must equal 1.
+- goal: Echo of the learning goal; aligns with RefinedPromptV1.goal.
+- modules[].title: Human-readable module name; becomes candidate H1 for generated notes.
+- modules[].description: Scope and intent of the module; used to generate rationales and tags.
+- modules[].topics: Canonical terms/subjects the module covers; map to routing topics/folders.
+- modules[].resources: Curated, bounded list of reference links; informs related_links and future reading.
+
+#### 3.1 `ProposalV1`
 
 ```json
 {
@@ -234,7 +389,23 @@ sequenceDiagram
 }
 ```
 
-### 3.2 `ValidationReport`
+Field semantics — ProposalV1
+
+- version: Contract version pin; must equal 1.
+- id: Client- or server-generated unique identifier (slug-safe). Used for correlation and audit lookups.
+- origin: Provenance of the proposal (prompt/enhancement/health_check) for audit segmentation and UX labeling.
+- target.route_id: Identifier of the matched routing rule; aids traceability of path decisions.
+- target.path: Final markdown path within the vault; sanitized, no traversal, `.md` enforced.
+- frontmatter.title: H1/title for the note; must match content body’s H1 on Apply.
+- frontmatter.status: Lifecycle state; governs visibility/workflows.
+- frontmatter.tags: Discovery and governance tags; capped for precision.
+- frontmatter.aliases: Alternate slugs/titles for backlink resolution.
+- body.content_md: Markdown payload (excluding frontmatter); enhancements must change body only.
+- governance.related_links: Outbound references for discovery/dup detection.
+- governance.rationale: Human-readable justification for creation/update; required for audit.
+- hash: SHA-256 over canonicalized proposal for idempotency and replay safety.
+
+#### 3.2 `ValidationReport`
 
 ```json
 {
@@ -264,7 +435,17 @@ sequenceDiagram
 }
 ```
 
-### 3.3 `ApplyBundleV1`
+Field semantics — ValidationReport
+
+- ok: Aggregate gate; false if any error-level issues are present.
+- matched_route_id: The route that matched the proposal path; aids UX explanations and governance checks.
+- errors[].code: Machine-readable code (e.g., SCHEMA_INVALID, ROUTING_MISMATCH) for UI remediation mapping.
+- errors[].path: JSON Pointer or field path indicating where the issue occurred.
+- errors[].message: Human-readable explanation suitable for UI.
+- errors[].severity: error blocks approval; warning permits proceed with caution.
+- errors[].ruleId: Optional internal rule identifier for telemetry and docs linking.
+
+#### 3.3 `ApplyBundleV1`
 
 ```json
 {
@@ -294,7 +475,16 @@ sequenceDiagram
 }
 ```
 
-### 3.4 `AuditRecord`
+Field semantics — ApplyBundleV1
+
+- bundle_hash: Deterministic hash of the intended bundle; used for idempotency and observability.
+- actions[].op: Operation type — create/modify/delete/link. Only create/modify may provide content.
+- actions[].path: Target path. Must be normalized within vault; traversal and NUL rejected.
+- actions[].content: New file payload (for create/modify). Must embed frontmatter + body on create.
+- actions[].link_target: Destination path for link operations; used to create or update links.
+- actions[].content_hash: Optional content integrity guard for modify; prevents blind overwrites.
+
+#### 3.4 `AuditRecord`
 
 ```json
 {
@@ -313,7 +503,16 @@ sequenceDiagram
 }
 ```
 
-### 3.5 `vault.json` Entry
+Field semantics — AuditRecord
+
+- ts: Event timestamp (UTC, ISO 8601). Must reflect append time after fsync to ensure ordering.
+- origin: Event class for audit segmentation (e.g., prompt/enhancement/health_check). If refinement events are introduced, extend enum accordingly.
+- justification: Human rationale for the action (why it was applied or proposed).
+- bundle_map: Opaque map linking bundle actions to paths and receipts; used by verifiers.
+- prev_hash: Chain pointer to previous record; ensures tamper-evident log.
+- record_hash: Current record hash; verifier recomputes and checks chain integrity.
+
+#### 3.5 `vault.json` Entry
 
 ```json
 {
@@ -333,6 +532,17 @@ sequenceDiagram
   }
 }
 ```
+
+Field semantics — VaultEntry
+
+- path: Vault-relative file path. Serves as the primary key for entries.
+- title: Note title; typically mirrors frontmatter title/H1.
+- topic: Routing topic classification; aligns with `routing.yaml` rules.
+- status: Note lifecycle state; governs workflow and visibility.
+- tags: Supplemental classification for discovery and governance.
+- mtime: Last modification time (epoch seconds). Used for incremental indexing.
+- size: File size in bytes. Useful for performance heuristics.
+- content_hash: SHA-256 over normalized file content; enables idempotency and undo safety checks.
 
 ---
 
@@ -453,6 +663,7 @@ sequenceDiagram
   - Validation failure rate (user vs system)  
   - Reindex throughput (files/sec)  
   - Health-check turnaround (event→proposal)  
+  - Prompt refinement latency (p50/p90)
 - **Diagnostics export:** Redacted `settings.json`, `routing.yaml`, latest `vault.json`, `audit.log` tail, environment snapshot (app version, node version, OS).
 
 ---

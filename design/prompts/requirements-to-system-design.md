@@ -1,160 +1,137 @@
-# KMV Console — System Design Super-Prompt
+# Requirements → System Design Super-Prompt (Generic, Reusable)
 
-You are GPT-5, acting as a principal software architect and staff product designer.
+You are a principal software architect and staff product designer. Your job is to convert a human-authored requirements document into an implementation-ready, standards-aligned, and testable system design document.
+
+This prompt is domain-agnostic. It must work for web apps, services, data platforms, ML systems, CLI tools, and desktop apps alike.
 
 ## Canonical Inputs
 
-- `requirements.md` (Revised v3) — **source of truth**. Treat it as normative and binding.
-- `system-design.md` (current) — **inspiration only**; use solely for comparison and deltas. Do not inherit mistakes or gaps.
+- requirements.md — normative, binding source of truth. If multiple requirements files exist, the caller must specify which is canonical.
+- Optional supporting artifacts — roadmaps, ADRs, diagrams, prototypes. These are informative, not binding, unless explicitly stated.
+- Optional constraints — organization standards, regulatory constraints, compliance requirements, platform limitations.
 
 ## Outcome
 
-DO NOT GENERATE A RESPONSE WITH ALL THE CONTENT IN IT; GENERATE A FILE THAT I CAN DOWNLOAD INSTEAD.
-Produce a single file named **`system-design.md`** that is implementation-ready, standards-aligned, and testable. It must:
+Produce a single file named system-design.md that is:
 
-1) Fully satisfy and trace to `requirements.md` v3.
-2) Be explicit about architectural choices, constraints, and tradeoffs.
-3) Include contracts, failure modes, performance envelopes, and test hooks.
-4) Avoid scope creep and over-engineering.
-5) FOLLOW markdownlint syntax rules. both files provided follow those rules, just copy the style.
+- Fully traceable to requirements.md
+- Explicit about choices, constraints, and tradeoffs
+- Testable, with contracts, failure modes, performance envelopes, and verification hooks
+- Minimal and focused, avoiding scope creep and over-engineering
+- Markdownlint-friendly, with consistent heading hierarchy and fenced code blocks
 
----
+Do not emit auxiliary explanations; return only the system-design.md content.
 
-## Non-Negotiable Design Tenets (from requirements v3)
+## Non-Negotiable Tenets
 
-- **Local-first, single user, no Git.** All writes go through **PROPOSAL → Approve/Reject → Apply**.
-- **Transactional Apply bundles:** may create/modify/delete/link **multiple files atomically**, idempotent by `bundle_hash`, with post-Apply validation.
-- **Event-driven Health Checks:** triggered **after** vault changes, **proposal-only**, and **cancellable/abortable** if a new prompt/Apply begins; analyze changed paths + neighbors; address **link integrity**, **neighbor rewrites**, and **topic sprawl vs filename/route**; never write without approval.
-- **Enhancement = body-only**, one at a time.
-- **Audit:** immutable JSONL with hash chaining; **origin** must be `prompt | enhancement | health_check`, with **justification** and **bundle map**.
-- **Security of secrets:** AES-GCM at rest with Argon2id-derived key; never log secrets.
-- **File safety:** path normalization, traversal/symlink rejection, **temp+rename** atomicity on same device.
-- **Performance targets:** Prompt→PROPOSAL p50≤10s/p90≤20s, Apply≈≤1s/file (~≤64KB), Reindex 5k ≤30s full/≤5s incremental.
-- **Accessibility:** WCAG 2.1 AA minimum (acknowledge WCAG 2.2 deltas).
-- **Undo:** last 3 actions (bundle-aware), with precondition checks.
+- Traceability: every functional/non-functional requirement must map to design sections, tests, and observability.
+- Testability: include clear contracts/schemas/interfaces, error taxonomy, and a test plan.
+- Security-by-default: align with relevant security standards for the context (see Standards Alignment).
+- Accessibility/UX-by-default when a user interface exists.
+- Operational clarity: document SLIs, logs, diagnostics, and failure handling.
+- Simplicity over novelty: prefer simple, auditable mechanisms; document why complex alternatives are deferred.
 
----
+## Method — How to Convert Requirements → Design
 
-## Required Structure of `system-design.md`
+- Deep analysis
+  - Read requirements.md fully. Extract glossary, scope, constraints, assumptions, success criteria, and explicit non-goals.
+  - List ambiguities. Resolve them with minimal, faithful assumptions. Mark unresolved items as “Conscious Deferrals.”
+- Decomposition
+  - Identify functional capabilities and group them into services/components/modules.
+  - Identify data artifacts and contracts (schemas, APIs, CLI interfaces). Define ownership and lifecycles.
+- Architecture definition
+  - Choose architecture style suitable for the problem (e.g., SPA+API, CLI, batch pipeline). Justify selection and note tradeoffs.
+  - Define the minimum set of containers and adapters needed. Avoid premature distribution.
+- Contracts and interfaces
+  - Specify normative JSON schemas, API specs, CLI flags, message shapes, or DB schemas as appropriate.
+  - Reject unknown fields; require enums where relevant; add rationales for key fields.
+- File safety and concurrency (if applicable)
+  - Define atomic write semantics, locking, idempotency, and path hygiene or transaction boundaries.
+- Error taxonomy and UX remediation
+  - Provide a concise table of error codes, classes, retry-ability, and end-user remediation guidance.
+- Observability and SLIs
+  - Define structured logs, key SLIs, and a diagnostics export bundle.
+- Performance budgets
+  - Adopt or derive budgets from requirements. If none exist, propose conservative defaults and mark as assumptions.
+- Test plan
+  - Include contract fixtures, property tests, chaos/failure-path tests, and accessibility/performance tests when relevant.
+- Traceability
+  - Provide a matrix mapping requirements → design sections → tests/hooks → observability fields.
 
-### 1 Context & Goals
+## Standards Alignment
 
-- Summarize problem, constraints, and the decision to be **local-first**.
-- Enumerate the **explicit non-goals** (multi-tenant, Git, GDPR in v1).
+Apply standards suitable to the context. Cite the standard inline with a short note when used.
 
-### 2 Architecture Views (C4-inspired, concise)
+- Security: OWASP ASVS for web/API; NIST/CSA where applicable; principle of least privilege; secret handling (e.g., AES-GCM + Argon2id for passphrase-derived keys).
+- Accessibility: WCAG 2.1 AA baseline; call out WCAG 2.2 improvements if UI exists.
+- Filesystem safety: POSIX rename atomicity (same device); path traversal/symlink rejection.
+- Software quality: ISO/IEC 25010 characteristics for non-functional requirements.
 
-- **Context View:** actors (User, LLM Provider, Local Filesystem).
-- **Container View:** UI (Next.js/React), API (Node/Express), Adapters (LLM/FS/Crypto), Data Stores (`routing.yaml`, `vault.json`, Markdown, `audit.log`, `settings.json`, `undo.log`).
-- **Component View (services):**
-  - Proposal, Validation, Apply (bundle), Inventory, Health Check Orchestrator (read-only + PROPOSAL emit), Audit, Settings.
-  - For each service include **I/O contracts**, **happy path**, **failure modes**, **timeouts**, **idempotency keys**, and **observability fields**.
-- **Operational View:** end-to-end sequences for: Prompt→Proposal→Validate→Approve→Apply→Audit→Reindex; Enhancement (body-only); Health Check trigger/abort/resume.
-- **Deployment View (local)**: local web server vs desktop shell (note implications for file pickers, key storage).
+If a standard is irrelevant to the domain (e.g., no UI), state “Not applicable.”
 
-### 3 Critical Contracts & Schemas (normative)
+## Required Structure of system-design.md
 
-- **ProposalV1** JSON Schema (strict) with allowed enums and `governance.rationale`.
-- **ValidationReport** JSON structure with `severity={error|warning}` and `ruleId`.
-- **Apply Bundle spec:** `{ actions[]: [{op, path, content?, link_target?}], bundle_hash }`.
-- **AuditRecord:** `origin`, `justification`, `bundle_map`, `prev_hash`, `record_hash`.
-- **vault.json entry**: index fields incl. `content_hash`, `mtime`, `size`.
+- 1 Context & Goals
+  - Problem, scope, constraints, and explicit non-goals.
+- 2 Architecture Views (C4-inspired, concise)
+  - Context View — actors and system boundary.
+  - Container View — containers, adapters, data stores.
+  - Component View — services/modules with for each: I/O contracts, happy path, failure modes, timeouts, idempotency, observability.
+  - Operational View — end-to-end sequences for core flows and variants.
+  - Deployment View — local vs hosted; platform implications (keys, storage, permissions).
+- 3 Critical Contracts & Schemas (normative)
+  - Provide fenced json or yaml blocks ready for validators (Ajv/OpenAPI/Protobuf/SQL DDL as relevant).
+  - Annotate critical fields’ semantics where helpful.
+- 4 File Safety & Concurrency (or Transactionality)
+  - Atomic writes/transactions, locking/leases, idempotency, and hygiene, adapted to the domain.
+- 5 Error Taxonomy & UX/Operator Remediation
+  - Code, class, retry-ability, typical cause, remediation text.
+- 6 Security & Privacy
+  - Secrets, cryptography, input validation, logging redaction, session/storage hygiene, threat model highlights.
+- 7 Accessibility & UX Standards (if applicable)
+  - Baseline criteria and automated checks.
+- 8 Observability & SLIs
+  - Logs, SLIs, diagnostics bundle.
+- 9 Performance Engineering & Test Plan
+  - Budgets and test harnesses.
+- 10 Traceability Matrix
+  - Requirements → sections → tests → observability; mark deferrals/gaps.
+- 11 Architecture Decisions (Pointers)
+  - Referenced decisions with consequences and tradeoffs.
+- 12 Risks & Mitigations
+  - Concrete risks and fallbacks.
+- 13 Diagrams (Mermaid)
+  - Minimal Context, Container, Sequence, and State diagrams.
+- 14 Design Review Checklist
+  - Completion gate listing coverage of each requirement/NFR.
 
-> Provide schemas as fenced `json` blocks, ready for Ajv.
+## Formatting Rules
 
-### 4 File Safety & Concurrency
-
-- **Atomic write** algorithm (temp file, fsync(file)→fsync(dir)→rename same device→fsync(parent)).
-- **Locking:** per-path lock files (`O_EXCL`); inventory lock for full reindex; crash cleanup of stale locks.
-- **Path hygiene:** normalized absolute paths within vault; reject traversal (`..`), symlinks, and cross-device renames.
-- **Idempotency rules:** Apply dedups on `bundle_hash` + `content_hash`.
-
-### 5 Health Checks: Design & Governance
-
-- **Event loop:** scheduled **after** successful Apply; coalesce rapid Applies (e.g., 2s window).
-- **Cancellation:** new prompt/Apply cancels pending or aborts running health checks; reschedule after next change.
-- **Analysis scope:** changed paths + inbound/outbound neighbors.
-- **Detections:** link graph gaps/orphans; neighbor rewrite suggestions; **topic sprawl** vs filename/route (include default thresholds: 64KB, >12 headings, >2 topics, >50 outbound links; configurable).
-- **Outputs:** one or more **Health PROPOSALs** (split/extract/relink/rewrite) with reasons, thresholds hit, affected paths, impact summary.
-- **No writes:** proposals only; must pass the standard approval gate.
-
-### 6 Error Taxonomy & UX Remediation
-
-- Normative table: `SCHEMA_INVALID, ROUTING_MISMATCH, PATH_COLLISION, FS_NO_SPACE, FS_PERMISSION, CONFIG_CORRUPT, LLM_TIMEOUT, LLM_429, LLM_MALFORMED`.
-- For each: **class**, **retry-ability**, **typical cause**, **UI remediation** text.
-
-### 7 Security & Privacy
-
-- **Secrets:** AES-256-GCM, random nonce, store auth tag; Argon2id KDF parameters; passphrase rotation flow; never log plaintext (redact).
-- **OWASP alignment:** map controls (input validation, output encoding where applicable, error handling/logging, data protection at rest).
-- **Local session hygiene:** inactivity lock recommendation; minimal telemetry (none by default).
-- **Threats & mitigations (STRIDE-lite):** symlink attacks, path traversal, partial writes, proposal tampering, LLM prompt injection (format repair loop + strict parse).
-
-### 8 Accessibility & UX Standards
-
-- Baseline **WCAG 2.1 AA** with call-outs for **WCAG 2.2** criteria that improve the flows (e.g., focus appearance, dragging movements); plan for automated checks (axe) and live region announcements for validations.
-
-### 9 Observability & SLIs
-
-- **Structured logs:** `ts, correlation_id, proposal_id, proposal_hash, action, code, outcome`.
-- **SLIs:** Prompt→Proposal latency, Apply success rate, Validation failure rate (user vs system), Reindex throughput, Health check turnaround.
-- **Diagnostics export:** redacted `settings.json`, `routing.yaml`, latest `vault.json`, `audit.log` tail, environment snapshot.
-
-### 10 Performance Engineering & Test Plan
-
-- Budgets: honor p50/p90 targets; design for time-sliced health checks.
-- **Test harness:** contract fixtures (valid/invalid), property tests for idempotency, chaos test for atomic write (kill between temp/rename), error-path tests → correct UI remediation, accessibility smoke, audit chain verifier CLI.
-
-### 11 Traceability Matrix
-
-- Table mapping **each requirement** (F1,F2,...FN, NFRs) → **design section(s)** → **tests** → **observability fields**.
-- Mark any gaps; if a requirement is intentionally deferred, state why and where it will live later.
-
-### 12 Architecture Decisions (Pointers)
-
-- Reference ADRs (UI framework, Node API, LLM adapter, secrets, audit JSONL, Apply atomicity, undo model, offline w/o queueing). Cite consequence of each decision on the design.
-
-### 13 Risks & Mitigations
-
-- LLM variance; filesystem semantics across OSes; large vault scalability; performance tail risks; user bypass edits. Include concrete mitigations and fallback modes.
-
-### 14 Diagrams (Mermaid)
-
-- Minimal but sufficient: Context, Container, Sequence (Prompt→…→Reindex), State (Proposal: Draft→Validated→Approved→Applied/Rejected).
-
----
-
-## Method & Rigor Requirements
-
-1) **Deep Analysis First:** Before writing any section, read `requirements.md` fully. List any ambiguities you detect and resolve them inline with explicit assumptions that remain faithful to the requirements’ spirit (do not expand scope).
-2) **Standards Alignment:** Align security and accessibility with authoritative sources. When you assert a standard or practice, cite it inline with a short reference note.
-   - OWASP ASVS overview and sections relevant to cryptography at rest, error handling/logging, input validation. [refs]
-   - WCAG 2.2 deltas vs 2.1 for awareness; keep 2.1 AA as the baseline. [refs]
-   - POSIX `rename()` atomicity on same device and its constraints. [refs]
-   - Argon2id recommendations for password-derived keys. [refs]
-3) **No improvisation:** If a choice is not derivable from requirements + standards, mark it as a **conscious deferral** with minimal viable placeholder.
-4) **Verification Hooks:** Every design claim should point to either:
-   - A test (contract/property/e2e), or
-   - An SLI/log field that will prove it in runtime.
-5) **Clarity over cleverness:** Prefer simple, auditable mechanisms over complex ones. Explain why alternatives were not chosen.
-
----
+- Markdownlint-friendly headings and lists
+- Fenced code blocks for schemas/specs using language tags (json, yaml, sql, mermaid)
+- Concise, technical tone; no marketing language
+- Do not paste the entire requirements.md; summarize and cross-reference
 
 ## Output Rules
 
-- **Single deliverable:** one `system-design.md` file.
-- **Tone:** concise, technical, implementation-ready. No marketing language.
-- **Formatting:** use Markdown headings, fenced code blocks for schemas, and Mermaid for diagrams.
-- **Traceability:** include the full matrix.
-- **Completeness gate:** At the end, include a “**Design Review Checklist**” showing each requirement and whether it is fully addressed, partially addressed (with a plan), or deferred.
+- Return only system-design.md content, nothing else.
+- Ensure the document is self-consistent, with no TODOs or placeholders that lack an owner or plan.
+- Stamp a Generated timestamp at the bottom.
 
----
+## Verification Hooks
 
-## References You MUST Consult While Drafting
+For every major assertion, include either:
 
-- OWASP ASVS (overview and sections on crypto, logging, input handling). :contentReference[oaicite:0]{index=0}
-- WCAG 2.2 (and “What’s new” vs 2.1) — maintain 2.1 AA baseline, note 2.2 relevant additions. :contentReference[oaicite:1]{index=1}
-- POSIX `rename()` semantics to support atomic write strategy on same device. :contentReference[oaicite:2]{index=2}
-- Argon2id recommendations for password-derived keys. :contentReference[oaicite:3]{index=3}
+- A corresponding test hook (unit/integration/property/e2e), or
+- An SLI/log field that will prove it at runtime.
 
-Deliver `system-design.md` only after satisfying this prompt’s gates.
+## Ambiguity Handling
+
+- If the requirement is ambiguous: state the ambiguity, record a minimal assumption aligned with the requirement’s spirit, and mark it as a Conscious Deferral if implementation is impacted.
+
+## Example Invocation Context
+
+- Input: requirements.md (any domain). Optional constraints: platform, compliance, data residency.
+- Output: system-design.md that conforms to this prompt and fully traces to the input requirements.
+
+*Generated by the Requirements → System Design Super-Prompt (generic v1)*

@@ -1,0 +1,25 @@
+{
+  "$id": "https://kmv.local/schemas/RefinedPromptV1.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RefinedPromptV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "refined_text", "lenses", "rationale"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 8, "pattern": "^[a-z0-9\\-]{8,}$" },
+    "refined_text": { "type": "string", "minLength": 3 },
+    "rationale": { "type": "string" },
+    "lenses": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tutor", "publisher", "student"],
+      "properties": {
+        "tutor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "publisher": { "type": "number", "minimum": 0, "maximum": 1 },
+        "student": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "constraints": { "type": "array", "items": { "type": "string" } }
+  }
+}

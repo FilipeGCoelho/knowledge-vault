@@ -1,0 +1,21 @@
+{
+  "$id": "https://kmv.local/schemas/PromptRefinementInput.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PromptRefinementInput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["goal"],
+  "properties": {
+    "goal": { "type": "string", "minLength": 3 },
+    "contextRefs": { "type": "array", "items": { "type": "string" } },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tutor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "publisher": { "type": "number", "minimum": 0, "maximum": 1 },
+        "student": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}
