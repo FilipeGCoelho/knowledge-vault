@@ -60,66 +60,17 @@ See design for details: [design/system-design.md](design/system-design.md)
 
 ## Diagrams (visualize the system)
 
-### Architecture overview (simplified)
+### Architecture overview (image)
 
-```mermaid
-flowchart LR
-  U[User / Researcher] --> UI[KMV UI (Next.js)]
-  UI --> API[Local API (Node/Express)]
-  API --> FS[(Vault Filesystem)]
-  API --> LLM[LLM Provider]
-  FS --> ROUTING[routing.yaml]
-  FS --> VAULT[vault.json]
-  VAULT --> AUDIT[audit.log]
-  API --> CRYPTO[Crypto/Keystore]
-```
+![Architecture overview](docs/img/architecture.svg)
 
-### Core flow (sequence)
+### Core flow (image)
 
-```mermaid
-sequenceDiagram
-  participant U as User
-  participant UI as UI
-  participant API as API
-  participant PRS as PRS
-  participant LLM as LLM
-  participant PROP as ProposalSvc
-  participant VAL as Validator
-  participant APPLY as ApplySvc
-  participant FS as Filesystem
-  participant AUD as Audit
+![Core flow](docs/img/flow.svg)
 
-  U->>UI: Enter learning goal / prompt
-  UI->>API: POST /refine (optional)
-  API->>PRS: refine
-  PRS->>LLM: curriculum-architect prompt
-  LLM-->>PRS: studyPlan + refinedPrompt
-  PRS-->>API: refinedPrompt
-  UI->>API: POST /proposal (refinedPrompt)
-  API->>PROP: create proposal
-  PROP->>LLM: call LLM
-  LLM-->>PROP: proposal payload
-  PROP-->>VAL: validate proposal
-  VAL-->>UI: ValidationReport
-  U->>UI: Approve
-  UI->>API: POST /apply
-  API->>APPLY: execute bundle
-  APPLY->>FS: atomic writes
-  APPLY->>AUD: append record
-  APPLY-->>UI: receipts
-```
+### Proposal state (image)
 
-### State machine (proposal)
-
-```mermaid
-stateDiagram-v2
-  [*] --> Draft
-  Draft --> Validated: schema + routing OK
-  Validated --> Approved
-  Approved --> Applied
-  Approved --> Rejected
-  Rejected --> Draft
-```
+![Proposal state](docs/img/state.svg)
 
 ---
 
@@ -136,8 +87,8 @@ See test plan and budgets: [design/system-design.md §10](design/system-design.m
 
 ## Visual polish tips for README render on GitHub
 
-- Mermaid diagrams render on GitHub; keep them concise.
-- For static PNG/SVG alternatives (if needed), export Mermaid diagrams and place under `/docs/img/` and link them with standard Markdown image syntax.
+- SVG diagrams are embedded for guaranteed rendering. Keep them concise and readable.
+- If you edit diagrams, regenerate SVGs in `docs/img/` and update links above.
 - Keep README sections short; link to design and contracts for depth.
 
 ---
