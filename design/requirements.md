@@ -292,3 +292,94 @@ The workflow is **Research → PROPOSAL → Approve/Reject → Apply**, keeping 
 * **Stack:** Next.js (UI), Node/Express (API), filesystem adapter, provider SDK (Gemini), optional Python indexer.  
 * **KMV owns scripts:** The app ships inventory & Apply logic; users only run the app—no manual scripting required.  
 * **No silent improvisation:** Every action re-reads `routing.yaml`; missing rules → PROPOSAL.
+
+---
+
+## Knowledge Organization Principles (Domain‑agnostic, Normative)
+
+This section defines how knowledge is organized on disk and in metadata so that routing.yaml can be generated, validated, and maintained deterministically over time.
+
+### Folder structure
+
+* Use short, lowercase, kebab-case folder and file names: `topic-group/example-note.md`.
+* One concept per file. Split when a file grows multi-topic or exceeds size/complexity thresholds (see health checks).
+* No spaces, no special characters; ASCII letters, digits, and `-` only.
+* File types
+  * Notes are Markdown with YAML frontmatter: first document only, delimited by `---`.
+  * Binary assets (images, diagrams) live under `/assets/` or note-local `/note-name.assets/` folders.
+* Frontmatter (required fields)
+  * `title: string` (3+ chars)
+  * `status: enum {draft,in-progress,review,published,archived}`
+* Frontmatter (optional fields)
+  * `tags: string[]` (≤ 24 items), `aliases: string[]` (≤ 8 items)
+  * Topics, tags, templates
+  * Topics are logical categories expressed as path prefixes (e.g., `topic/…`) and mirrored in routing rules.
+  * Tags are normalized, lowercase kebab-case. Tag namespaces may be used (e.g., `domain/*`, `std/*`).
+  * Templates describe minimal section scaffolds (e.g., `study_note`, `deep_dive`) used by routes to enforce required sections.
+
+---
+
+## Routing YAML Requirements (Normative)
+
+The routing.yaml is the single source of truth (SSOT) for structure and validation. It MUST be machine-validated and idempotently generated.
+
+* MUST contain (top-level keys)
+  * `conventions`: naming, link style, defaults (e.g., status default).
+  * `schemas`: frontmatter constraints (required, optional, enums) and template section requirements.
+  * `routes`: array of route entries (see Data Model below in System Design). Each route defines `id`, `pattern`, `topic`, `template`, and any additional constraints (required sections, path/folder rules, examples required, etc.).
+  * `health_checks`: thresholds and rules for link integrity, multi-topic sprawl, and required sections.
+  * `acceptance`: global gates that must pass before Apply is allowed (e.g., frontmatter_complete, title_matches_h1).
+* MUST enforce invariants
+  * Unique `routes[].id` across the file.
+  * Normalized, non-overlapping `routes[].pattern` (glob) that resolve deterministically.
+  * `topic` and `tags` are lowercase kebab-case; templates exist and define sections they require.
+  * All referenced templates and enums exist under `schemas`.
+  * All defaults and enums in `conventions`/`schemas` are coherent with `acceptance` and `health_checks`.
+* SHOULD
+  * Provide auto-fix suggestions (normalization hints) when violations are detected, without silently mutating YAML.
+  * Carry minimal inline template scaffolds for quick authoring.
+* COULD
+  * Include a `changelog` section capturing structured revisions (version/date/summary) for governance.
+
+---
+
+## Routing YAML Feature Priorities (MoSCoW)
+
+* MUST
+  * Validate against a JSON Schema (see Appendix A) prior to use.
+  * Define `conventions`, `schemas`, `routes`, `health_checks`, `acceptance` with the invariants above.
+  * Be idempotently emitted by the generator for a given input state (same inputs ⇒ same YAML bytes modulo ordering rules).
+* SHOULD
+  * Provide auto-fix suggestions and clear remediation messages with error codes.
+  * Support deterministic route ordering (by `id` or `pattern`) to reduce churn in diffs.
+* COULD
+  * Embed `templates` with minimal bodies to speed note creation.
+  * Maintain an internal `version` and `changelog` to track governance updates.
+
+---
+
+## Routing YAML Acceptance Criteria (Testable)
+
+* Schema conformance
+  * Every routing.yaml MUST validate against Appendix A (JSON Schema) with zero warnings or errors.
+* Invariants
+  * `routes[].id` MUST be unique; generator MUST fail with `ROUTING_DUPLICATE_ID` otherwise.
+  * `routes[].pattern` MUST NOT overlap ambiguously; overlaps MUST be resolved by explicit precedence or generator fails with `ROUTING_PATTERN_CONFLICT`.
+  * `templates` referenced by any route MUST exist; missing template ⇒ `ROUTING_TEMPLATE_UNKNOWN`.
+* Quality gates
+  * Every route with `required_sections` MUST be satisfied by candidate notes; failure ⇒ `ROUTING_REQUIRED_SECTIONS_MISSING`.
+  * Every new/changed YAML MUST pass health-check thresholds unless waived with an explicit, auditable rationale field.
+  * Title/H1 consistency: `acceptance.title_matches_h1` MUST pass for all notes.
+* Idempotency
+  * Running the generator twice on unchanged input MUST produce byte-identical YAML (except for timestamp field if present), verified via hash.
+* Evolution
+  * Adding a new route MUST specify `id`, `pattern`, `topic`, `template` at minimum, and pass a dry-run validation over the current vault before merge.
+  * Deprecating a route MUST either (a) include a migration rule, or (b) document non-applicability with zero breaking conflicts.
+
+---
+
+## Neutral Examples (Informative)
+
+* Folder example: `topic/example/2025-01-01-intro.md`
+* Route example (conceptual): pattern `topic/example/*.md`, template `study_note`, required_sections `["Summary","References"]`.
+* Tag namespaces: `domain/*`, `tech/*`, `ref/*`.

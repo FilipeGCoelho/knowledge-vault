@@ -797,3 +797,289 @@ stateDiagram-v2
 ---
 
 *Generated: 2025-09-25T17:20:10Z*
+
+---
+
+## 17. Routing YAML Data Model (Normative)
+
+Top-level keys (all required): `conventions`, `schemas`, `routes`, `health_checks`, `acceptance`.
+
+- conventions
+  - `date_format: string` (e.g., YYYY-MM-DD)
+  - `link_style: string` (e.g., wikilink | md)
+  - `create_if_missing: boolean`
+  - `status.default: string`, `status.allowed: string[]`
+- schemas
+  - `frontmatter.required: string[]`
+  - `frontmatter.optional: string[]`
+  - `frontmatter.enums.<field>: string[]`
+  - `templates.<template_name>.required_sections: string[]` (optional)
+- routes (array)
+  - `id: string` (unique)
+  - `pattern: string` (glob; normalized)
+  - `topic: string` (lowercase kebab-case)
+  - `template: string` (must be defined under `schemas.templates`)
+  - Optional attributes: `tags: string[]`, `required_sections: string[]`, `examples_expected: boolean`, `require_code_block: boolean`, `notes: string[]`
+- health_checks
+  - `link_integrity: boolean`
+  - `multi_topic_sprawl: { size_kb: number, max_headings: number, distinct_topics: number }`
+  - `required_sections: [{ route: string, must_have: string[] }]`
+- acceptance
+  - `frontmatter_complete: boolean`
+  - `title_matches_h1: boolean`
+  - `body_min_length: number`
+
+---
+
+## 18. Routing YAML Generation Algorithm (Deterministic)
+
+1) Discover inputs
+   - Scan the vault for Markdown notes, parse frontmatter, compute metadata (path, title, tags, status, size, headings count).
+   - Read organizational policies and defaults (conventions, allowed enums, templates).
+2) Classify
+   - For each note, find matching route candidates by `pattern`. Resolve conflicts by precedence (exactness or configured ordering).
+   - Validate frontmatter against `schemas.frontmatter` and route template requirements.
+3) Merge
+   - Construct `routes` entries (if generating from discovery) or verify pre-existing routes cover all files.
+   - Normalize topics, tags, and template references.
+4) Validate
+   - Run `health_checks` (link integrity, sprawl thresholds, required_sections) and global `acceptance` gates.
+   - Accumulate findings with error codes. Abort on errors; produce advisory fixes on warnings.
+5) Emit
+   - Serialize routing.yaml with stable ordering (by `id`) and formatting rules. Re-run schema validation to assert idempotency.
+
+Outputs: deterministic YAML (same inputs ⇒ same output), a `ValidationReport`-like summary, and optional auto-fix suggestions (not applied without approval).
+
+---
+
+## 19. Governance & Lifecycle (Versioning, Migration, Errors)
+
+- Versioning
+  - Include `version: semver` at the top-level when governance requires; changes to structure bump minor/major accordingly.
+- Migration
+  - Deprecate routes with a `notes` entry and provide a migration map (old pattern → new pattern) or indicate no-op when safe.
+  - Migration proposals are emitted as PROPOSALs; no automatic file moves without approval.
+- Error handling
+  - Schema errors: fail with `ROUTING_SCHEMA_INVALID` and list JSON Pointers.
+  - Validation failures: `ROUTING_DUPLICATE_ID`, `ROUTING_PATTERN_CONFLICT`, `ROUTING_TEMPLATE_UNKNOWN`, `ROUTING_REQUIRED_SECTIONS_MISSING`, `ROUTING_TAG_INVALID`.
+  - Conflicts are resolved by explicit precedence or user approval of a remap.
+
+---
+
+## 20. Testing & Validation (Deterministic, Automated)
+
+- Test vectors
+  - Minimal routing.yaml (Appendix B) → MUST pass schema and produce zero warnings.
+  - Overlapping patterns → MUST produce `ROUTING_PATTERN_CONFLICT`.
+  - Missing template → `ROUTING_TEMPLATE_UNKNOWN`.
+  - Required sections absent → `ROUTING_REQUIRED_SECTIONS_MISSING`.
+- Coverage
+  - Health-checks: link integrity (broken links), sprawl thresholds, and required_sections.
+  - Acceptance: title/H1 match, frontmatter completeness, body length.
+- Expected outputs
+  - Machine-readable `ok: boolean`, `errors: []`, `warnings: []` with codes; stable output hash for idempotency.
+
+---
+
+## 21. Appendices (Shared)
+
+### Appendix A — JSON Schema for routing.yaml
+
+```json
+{
+  "$id": "https://kmv.local/schemas/RoutingYAML.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["conventions","schemas","routes","health_checks","acceptance"],
+  "additionalProperties": false,
+  "properties": {
+    "conventions": {
+      "type": "object",
+      "required": ["date_format","link_style","create_if_missing","status"],
+      "additionalProperties": false,
+      "properties": {
+        "date_format": { "type": "string" },
+        "link_style": { "type": "string", "enum": ["wikilink","md"] },
+        "create_if_missing": { "type": "boolean" },
+        "status": {
+          "type": "object",
+          "required": ["default","allowed"],
+          "properties": {
+            "default": { "type": "string" },
+            "allowed": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "required": ["frontmatter"],
+      "properties": {
+        "frontmatter": {
+          "type": "object",
+          "required": ["required","optional","enums"],
+          "additionalProperties": false,
+          "properties": {
+            "required": { "type": "array", "items": { "type": "string" } },
+            "optional": { "type": "array", "items": { "type": "string" } },
+            "enums": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } }
+          }
+        },
+        "templates": {
+          "type": "object",
+          "additionalProperties": { "type": "object", "properties": { "required_sections": { "type": "array", "items": { "type": "string" } } } }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id","pattern","topic","template"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 3 },
+          "pattern": { "type": "string", "minLength": 3 },
+          "topic": { "type": "string", "pattern": "^[a-z0-9\-]+$" },
+          "template": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "required_sections": { "type": "array", "items": { "type": "string" } },
+          "examples_expected": { "type": "boolean" },
+          "require_code_block": { "type": "boolean" },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "health_checks": {
+      "type": "object",
+      "required": ["link_integrity","multi_topic_sprawl","required_sections"],
+      "properties": {
+        "link_integrity": { "type": "boolean" },
+        "multi_topic_sprawl": {
+          "type": "object",
+          "required": ["size_kb","max_headings","distinct_topics"],
+          "properties": {
+            "size_kb": { "type": "number", "minimum": 0 },
+            "max_headings": { "type": "number", "minimum": 0 },
+            "distinct_topics": { "type": "number", "minimum": 0 }
+          }
+        },
+        "required_sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["route","must_have"],
+            "properties": {
+              "route": { "type": "string" },
+              "must_have": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "required": ["frontmatter_complete","title_matches_h1","body_min_length"],
+      "properties": {
+        "frontmatter_complete": { "type": "boolean" },
+        "title_matches_h1": { "type": "boolean" },
+        "body_min_length": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}
+```
+
+### Appendix B — Minimal vs Full routing.yaml (Neutral Examples)
+
+Minimal:
+
+```yaml
+conventions:
+  date_format: "YYYY-MM-DD"
+  link_style: "wikilink"
+  create_if_missing: true
+  status:
+    default: "draft"
+    allowed: [draft, in-progress, review, published, archived]
+schemas:
+  frontmatter:
+    required: [title, status]
+    optional: [tags]
+    enums: { status: [draft, in-progress, review, published, archived] }
+routes:
+  - id: topic/example
+    pattern: "topic/example/*.md"
+    topic: example
+    template: study_note
+health_checks:
+  link_integrity: true
+  multi_topic_sprawl: { size_kb: 64, max_headings: 12, distinct_topics: 2 }
+  required_sections: []
+acceptance:
+  frontmatter_complete: true
+  title_matches_h1: true
+  body_min_length: 150
+```
+
+Full (illustrative):
+
+```yaml
+conventions:
+  date_format: "YYYY-MM-DD"
+  link_style: "md"
+  create_if_missing: false
+  status:
+    default: "draft"
+    allowed: [draft, in-progress, review, published, archived]
+schemas:
+  frontmatter:
+    required: [title, status]
+    optional: [tags, aliases]
+    enums:
+      status: [draft, in-progress, review, published, archived]
+  templates:
+    study_note: { required_sections: ["Summary","References"] }
+    deep_dive:  { required_sections: ["Concepts","Decisions","References"] }
+routes:
+  - id: topic/example/overview
+    pattern: "topic/example/overview/*.md"
+    topic: example
+    template: study_note
+    tags: ["ref/overview"]
+  - id: topic/example/deep
+    pattern: "topic/example/deep/*.md"
+    topic: example
+    template: deep_dive
+    required_sections: ["Concepts","Decisions","References"]
+health_checks:
+  link_integrity: true
+  multi_topic_sprawl: { size_kb: 64, max_headings: 12, distinct_topics: 2 }
+  required_sections:
+    - { route: topic/example/deep, must_have: ["Concepts","Decisions","References"] }
+acceptance:
+  frontmatter_complete: true
+  title_matches_h1: true
+  body_min_length: 200
+```
+
+### Appendix C — Validation Error Codes
+
+- `ROUTING_SCHEMA_INVALID` — YAML fails JSON Schema validation.
+- `ROUTING_DUPLICATE_ID` — two or more routes share the same `id`.
+- `ROUTING_PATTERN_CONFLICT` — ambiguous or overlapping patterns without precedence.
+- `ROUTING_TEMPLATE_UNKNOWN` — route references an undefined template.
+- `ROUTING_REQUIRED_SECTIONS_MISSING` — required sections not found in candidate note.
+- `ROUTING_TAG_INVALID` — tag normalization or namespace violation.
+
+### Appendix D — Evolution Rules
+
+- Adding categories
+  - Add new `routes` entries with unique `id` and non-overlapping `pattern`; dry-run validate across the vault.
+- Deprecating routes
+  - Mark with a `notes` entry and provide either a migration map or evidence of non-use.
+- Template changes
+  - Bump version and add migration notes for new required sections; provide a lint rule to surface missing sections.
+- Policy changes
+  - Update `conventions`/`schemas` and run full validation; require explicit approver sign-off when gates tighten.
