@@ -2,7 +2,7 @@
 
 Purpose & Responsibilities
 
-Convert a raw learning goal into a structured study plan and refined prompt for downstream proposal generation. Stateless, advisory-only (no writes to vault).
+Convert a raw learning goal into a structured study plan and refined prompt for downstream proposal generation.Stateless, advisory-only (no writes to vault).
 
 Inputs / Outputs (Contracts)
 
@@ -66,20 +66,20 @@ Ready-to-Implement Checklist
    - Expect strict JSON payload with fields `refinedPrompt` and `studyPlan`.
 
 4) Parse & validate (attempt 1)
-   - Parse JSON; validate `refinedPrompt` against RefinedPromptV1 and `studyPlan` against StudyPlanV1 (Ajv, strict). 
+   - Parse JSON; validate `refinedPrompt` against RefinedPromptV1 and `studyPlan` against StudyPlanV1 (Ajv, strict).
    - On success: proceed to finalize.
 
 5) Repair loop (attempt 2 if needed)
-   - If validation fails, construct a targeted repair instruction that lists schema errors (paths + reasons). 
-   - Re-prompt once with the same template + repair guidance. 
+   - If validation fails, construct a targeted repair instruction that lists schema errors (paths + reasons).
+   - Re-prompt once with the same template + repair guidance.
    - If still failing → return error with details; no vault writes.
 
 6) Finalize & respond
-   - Compute `inputs_fingerprint = sha256(canonical({goal, contextRefs, weights, templateVersion}))` for observability (not persisted in vault). 
+   - Compute `inputs_fingerprint = sha256(canonical({goal, contextRefs, weights, templateVersion}))` for observability (not persisted in vault).
    - Log `{correlation_id, templateVersion, attempts, inputs_fingerprint}` and metrics.
    - Return `{ refinedPrompt, studyPlan }` to caller.
 
-Note: No filesystem writes. The Proposal Service consumes `refinedPrompt.refinedText` later.
+Note: No filesystem writes.The Proposal Service consumes `refinedPrompt.refinedText` later.
 
 ```mermaid
 sequenceDiagram
@@ -103,15 +103,15 @@ sequenceDiagram
   - lensWeights: clamp to [0,1]; if absent, distribute equally; store effective weights.
 
 - Prompt construction
-  - System message: curriculum-architect template (pin version). 
-  - Include strict output spec and schemas references (names, not full schema text). 
+  - System message: curriculum-architect template (pin version).
+  - Include strict output spec and schemas references (names, not full schema text).
   - Provide compact examples when helpful (never leak PII/secrets).
 
 - LLM invocation
   - `timeoutMs`, `maxRetries` (for 429); `attempt` counter included in logs.
 
 - Strict parsing & validation
-  - Parse JSON only; reject Markdown code fences; unknown keys rejected. 
+  - Parse JSON only; reject Markdown code fences; unknown keys rejected.
   - Ajv validation for both payloads; collect error list with JSON Pointers.
 
 - Repair strategy (single retry)
@@ -138,7 +138,7 @@ Output (RefinedPromptV1):
 {
     "version": 1,
     "goal": "Learn REST API design fundamentals to build secure JSON APIs",
-    "refinedText": "You are to generate a comprehensive, structured learning proposal on REST API design fundamentals with a focus on building secure JSON APIs. Organize the material into a progressive study path that starts with HTTP and REST basics, moves through design principles and standards, covers authentication and authorization models, emphasizes API security practices (e.g., OWASP API Top 10), and concludes with documentation and testing strategies. Ensure the proposal balances pedagogical clarity (as a tutor), scientific rigor with established categories and terminology (as a publisher), and cognitive accessibility with practical examples and reflection points (as a student). Draw connections to existing references such as REST vs RPC debates and the OWASP API Security project. The output should be modular, indexed, and usable for both study and reference.",
+    "refinedText": "You are to generate a comprehensive, structured learning proposal on REST API design fundamentals with a focus on building secure JSON APIs.Organize the material into a progressive study path that starts with HTTP and REST basics, moves through design principles and standards, covers authentication and authorization models, emphasizes API security practices (e.g., OWASP API Top 10), and concludes with documentation and testing strategies.Ensure the proposal balances pedagogical clarity (as a tutor), scientific rigor with established categories and terminology (as a publisher), and cognitive accessibility with practical examples and reflection points (as a student).Draw connections to existing references such as REST vs RPC debates and the OWASP API Security project.The output should be modular, indexed, and usable for both study and reference.",
     "weights": { "tutor": 0.4, "publisher": 0.3, "student": 0.3 },
     "templateVersion": "curriculum-architect-v1"
   }
@@ -209,19 +209,19 @@ Optional module routing_suggestions (example):
 ## Validation & Repair Details
 
 - Validation combines two schemas; both must pass or the request fails.
-- On failure, return HTTP 400 with a machine-readable list `{ path, message, code: "SCHEMA_INVALID" }` and a human tip. 
-- During the single retry, the repair guidance includes the minimal diff needed (e.g., missing field, wrong enum). 
+- On failure, return HTTP 400 with a machine-readable list `{ path, message, code: "SCHEMA_INVALID" }` and a human tip.
+- During the single retry, the repair guidance includes the minimal diff needed (e.g., missing field, wrong enum).
 
 ## Emitted Metrics & Logs per Step
 
-- Step 1: `inputs_normalized=1` (log), goal_length, weights_distribution. 
-- Step 3: `refinement_attempt` counter; provider latency; retry_count. 
-- Step 4/5: validation_error_count; fields_missing; repair_attempted (boolean). 
+- Step 1: `inputs_normalized=1` (log), goal_length, weights_distribution.
+- Step 3: `refinement_attempt` counter; provider latency; retry_count.
+- Step 4/5: validation_error_count; fields_missing; repair_attempted (boolean).
 - Step 6: `refinement_latency_ms`, `plan_size_chars`, `refined_text_size`.
 
 ## Edge Cases & Decisions
 
-- Extremely broad goals → return minimal viable plan with 3 modules and guidance to refine scope. 
-- Over-long resources list → truncate to 12 per schema. 
-- Missing weights → distribute equally; record distribution in `weights`. 
+- Extremely broad goals → return minimal viable plan with 3 modules and guidance to refine scope.
+- Over-long resources list → truncate to 12 per schema.
+- Missing weights → distribute equally; record distribution in `weights`.
 - Non-JSON LLM output (e.g., Markdown) → hard fail with repair attempt; no best-effort parsing beyond JSON.

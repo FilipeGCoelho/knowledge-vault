@@ -59,7 +59,7 @@ Ready-to-Implement Checklist
    - Validate the incoming ProposalV1 with Ajv (strict, unknown keys rejected). If invalid → `SCHEMA_INVALID` with pointers; stop.
 
 3. Route matching
-   - Evaluate `routing.routes[].pattern` (glob) against `proposal.target.path` using a deterministic matcher. 
+   - Evaluate `routing.routes[].pattern` (glob) against `proposal.target.path` using a deterministic matcher.
    - If multiple match: resolve by configured precedence rule (specificity > id order, or explicit precedence if defined). If unresolved → `ROUTING_PATTERN_CONFLICT`.
    - If none match → `ROUTING_MISMATCH`.
 
@@ -68,11 +68,11 @@ Ready-to-Implement Checklist
    - If the route or template defines `required_sections`, verify the note body contains the headings; else `ROUTING_REQUIRED_SECTIONS_MISSING`.
 
 5. Path policy & collisions
-   - Normalize path within vault root; reject traversal (`..`) and non-`.md` extensions; check collision against `vault.json`. 
+   - Normalize path within vault root; reject traversal (`..`) and non-`.md` extensions; check collision against `vault.json`.
    - If target exists and action implies create (not modify) → `PATH_COLLISION`.
 
 6. Frontmatter & enhancement policy
-   - Enforce frontmatter required fields per `routing.schemas.frontmatter`. 
+   - Enforce frontmatter required fields per `routing.schemas.frontmatter`.
    - For `origin = "enhancement"`, ensure changes are body-only (frontmatter unchanged unless explicitly allowed by UI flow). If violated → `FM_UNCHANGED` error.
 
 7. Links and neighbors (advisory)
