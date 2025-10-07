@@ -98,15 +98,16 @@ Each service lists **I/O contracts**, **happy path**, **failure modes**, **timeo
 - Input: PromptRefinementInput (goal, contextRefs, lensWeights) as defined in contracts.
 - Outputs: RefinedPromptV1 and StudyPlanV1 as defined in contracts; optional module routing_suggestions.
 - Lifecycle: Stateless; two repair attempts max; deterministic output via input hash and templateVersion.
-- Endpoints: POST /refine returns { refinedPrompt: RefinedPromptV1, studyPlan: StudyPlanV1 }.
+- Endpoints: POST /refine returns { refinedPrompt, studyPlan }.
+- Behavior flag: autoStripAdditionalProps (bool). If enabled per-request or via env REFINE_AUTO_STRIP_ADDITIONAL_PROPS, the service strips any additionalProperties from LLM outputs and, if the sanitized payloads validate, returns them without error.
 - DataModels: See contracts/PromptRefinementInput.schema.json, RefinedPromptV1.schema.json, StudyPlanV1.schema.json.
-- Validation: Outputs validated against strict schemas; if validation fails, provide repair guidance; on second failure, report error.
+- Validation: Outputs validated against strict schemas; if validation fails, provide repair guidance; on second failure, report error unless autoStripAdditionalProps produces a valid sanitized result.
 - Weights/Lenses: Weights influence refinement output; persisted for audit.
 - Observability: metrics refine_latency_ms, plan_size_chars, refined_text_size, weights_distribution, success_rate.
 - Security: ephemeral results; do not persist in vault; redact sensitive fields in logs.
 - UI/UX: Two-pane UI (Study Plan left, Refined Prompt right) with weights sliders and a review step before Proposal generation.
 - Governance: refinement events logged with origin=refinement in Audit; linked to subsequent Proposal.
-- Testing: unit tests for input validation and repair; integration tests for /refine flow; performance testing to meet budgets.
+- Testing: unit tests for input validation, repair, and auto-strip pathway; integration tests for /refine flow; performance testing to meet budgets.
 - Cross-links: reference to contracts for PromptRefinementInput, RefinedPromptV1, StudyPlanV1.
 
 #### 2.3.1 Proposal Service

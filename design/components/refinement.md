@@ -12,11 +12,14 @@ Inputs / Outputs (Contracts)
 Interfaces
 
 - HTTP: POST /refine → { refinedPrompt: RefinedPromptV1, studyPlan: StudyPlanV1 }
+- Query/body options:
+  - autoStripAdditionalProps (boolean, optional): when true, the service will automatically strip any additional properties not declared in the schemas from the LLM output and, if the sanitized payloads validate, return them instead of throwing an error. Defaults from env REFINE_AUTO_STRIP_ADDITIONAL_PROPS.
 - Internal: LLM adapter invocation with curriculum prompt; audit logging with origin=refinement.
 
 Failure Modes & Error Codes
 
 - LLM_TIMEOUT, LLM_429, LLM_MALFORMED; validation failure with actionable repair guidance.
+- When autoStripAdditionalProps=true, additionalProperties violations are sanitized away and no error is thrown if the sanitized outputs validate.
 
 Observability
 
@@ -225,3 +228,37 @@ Optional module routing_suggestions (example):
 - Over-long resources list → truncate to 12 per schema.
 - Missing weights → distribute equally; record distribution in `weights`.
 - Non-JSON LLM output (e.g., Markdown) → hard fail with repair attempt; no best-effort parsing beyond JSON.
+
+---
+
+## Implementation Notes (v0.1.0)
+
+- Language/Runtime: Node.js (>=18), TypeScript strict mode.
+- HTTP Endpoint: POST `/refine` in local API (Express). Returns `{ refinedPrompt, studyPlan }`.
+- Contracts: Ajv strict validation against `PromptRefinementInput`, `RefinedPromptV1`, `StudyPlanV1`.
+- DI & Adapters: `LLMAdapter` interface with `MockLLMAdapter` default for local/offline tests.
+- Repair Loop: Single retry with targeted guidance using Ajv error pointers.
+- Timeouts/Backoff: 8 s default timeout; single retry for 429 with jittered backoff.
+- Security: Inputs validated, outputs ephemeral, logs redacted (no payloads), no persistence.
+- Observability: Pino JSON logs with `correlation_id`; Prometheus metrics `/metrics` endpoint.
+- Performance: Mock adapter returns instantly; real adapter must meet p90 ≤ 16 s budget.
+
+## Runbook (Local)
+
+- Start service: `npm run dev` (dev) or `npm start` (built). Default port 3030.
+- Health: `GET /health` → `{ ok: true }`.
+- Metrics: `GET /metrics` (Prometheus format). Key series: `refinement_latency_ms`, `refined_text_size`, `plan_size_chars`, `refinement_success_total`, `refinement_failure_total`.
+- Request example:
+  - POST `/refine?autoStripAdditionalProps=true` with `Content-Type: application/json` and body matching `PromptRefinementInput`.
+  - Or include `{ options: { autoStripAdditionalProps: true } }` wrapper in body.
+- Env defaults:
+  - `REFINE_AUTO_STRIP_ADDITIONAL_PROPS` (default false). When true, behaves as if the query/body flag were set.
+- Logs: Structured JSON to stdout; include `correlation_id`, `action`, `duration_ms`.
+- Failure handling:
+  - `SCHEMA_INVALID` → HTTP 400 with Ajv pointers under `details`.
+  - `LLM_TIMEOUT`/`LLM_429`/`LLM_MALFORMED` → HTTP 502 with `retryable` flag.
+
+## Traceability
+
+- Maps to System Design §2.3.0 (Prompt Refinement Service), §3.0 contracts, §6 error taxonomy, §9 observability.
+- Tests reference acceptance criteria: schema-conformant outputs; ≤ 2 attempts.

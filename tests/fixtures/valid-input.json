@@ -1,0 +1,8 @@
+{
+  "goal": "Learn REST API design fundamentals to build secure JSON APIs",
+  "contextRefs": [
+    "notes/api/rest-vs-rpc.md",
+    "https://owasp.org/www-project-api-security/"
+  ],
+  "lensWeights": { "tutor": 0.4, "publisher": 0.3, "student": 0.3 }
+}

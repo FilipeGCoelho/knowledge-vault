@@ -1,0 +1,60 @@
+# Node dependencies
+node_modules/
+
+# Build outputs
+/dist/
+/out/
+/build/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Test coverage and reports
+/coverage/
+/.nyc_output/
+
+# Logs
+logs/
+*.log
+*.log.*
+pino-*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor/IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Icon?
+.Spotlight-V100
+.Trashes
+
+# Tool caches
+.eslintcache
+.turbo/
+.cache/
+.vite/
+
+# App artifacts
+sbom.json
+diagnostics.json
+
+# Framework artifacts (future-proof)
+.next/
+.vercel/
+
+# Temporary files
+/tmp/
+/temp/
+*.tmp
+
+# ignore folder
+/ignore/
