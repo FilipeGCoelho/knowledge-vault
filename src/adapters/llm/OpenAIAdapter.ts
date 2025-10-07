@@ -1,5 +1,6 @@
-import { LLMAdapter, LLMAdapterResponse, LLMCompletionParams } from './LLMAdapter';
 import OpenAI from 'openai';
+
+import { LLMAdapter, LLMAdapterResponse, LLMCompletionParams } from './LLMAdapter';
 
 export interface OpenAIAdapterOptions {
   apiKey: string;
