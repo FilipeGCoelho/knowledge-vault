@@ -100,10 +100,8 @@ Each service lists **I/O contracts**, **happy path**, **failure modes**, **timeo
 - Lifecycle: Stateless; two repair attempts max; deterministic output via input hash and templateVersion.
 - Endpoints: POST /refine returns { refinedPrompt, studyPlan }.
 - Behavior flag: autoStripAdditionalProps (bool). If enabled per-request or via env REFINE_AUTO_STRIP_ADDITIONAL_PROPS, the service strips any additionalProperties from LLM outputs and, if the sanitized payloads validate, returns them without error.
-- DataModels: See contracts/PromptRefinementInput.schema.json, RefinedPromptV1.schema.json, StudyPlanV1.schema.json.
-- Validation: Outputs validated against strict schemas; if validation fails, provide repair guidance; on second failure, report error unless autoStripAdditionalProps produces a valid sanitized result.
-- Weights/Lenses: Weights influence refinement output; persisted for audit.
-- Observability: metrics refine_latency_ms, plan_size_chars, refined_text_size, weights_distribution, success_rate.
+- Prompt spec generation: The strict output specification embedded in the system prompt is rendered dynamically at runtime from the live JSON Schemas (RefinedPromptV1, StudyPlanV1) to avoid drift.
+- Observability: metrics refine_latency_ms, plan_size_chars, refined_text_size, weights_distribution, success_rate. When LOG_LEVEL=debug, all LLM inputs/outputs are also logged to JSONL files under logs/llm/.
 - Security: ephemeral results; do not persist in vault; redact sensitive fields in logs.
 - UI/UX: Two-pane UI (Study Plan left, Refined Prompt right) with weights sliders and a review step before Proposal generation.
 - Governance: refinement events logged with origin=refinement in Audit; linked to subsequent Proposal.
@@ -262,63 +260,116 @@ Field semantics — PromptRefinementInput
 ```json
 {
   "$id": "https://kmv.local/schemas/RefinedPromptV1.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RefinedPromptV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "goal", "refinedText", "weights", "templateVersion"],
+  "required": ["version", "id", "refined_text", "lenses", "rationale"],
   "properties": {
     "version": { "const": 1 },
-    "goal": { "type": "string", "minLength": 8 },
-    "refinedText": { "type": "string", "minLength": 8 },
-    "weights": {
+    "id": { "type": "string", "minLength": 8, "pattern": "^[a-z0-9\\-]{8,}$" },
+    "refined_text": { "type": "string", "minLength": 3 },
+    "rationale": { "type": "string" },
+    "lenses": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": {
-        "^[a-zA-Z0-9_\\-]{2,32}$": { "type": "number", "minimum": 0, "maximum": 1 }
+      "required": ["tutor", "publisher", "student"],
+      "properties": {
+        "tutor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "publisher": { "type": "number", "minimum": 0, "maximum": 1 },
+        "student": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
-    "templateVersion": { "type": "string", "minLength": 1 }
+    "constraints": { "type": "array", "items": { "type": "string" } }
   }
 }
 ```
 
 Field semantics — RefinedPromptV1
 
-- version: Contract version pin for forward-compat checks. Must equal 1.
-- goal: Echo of the original learning objective (post-cleanup), for traceability and audit diffs.
-- refinedText: Final LLM-facing prompt text, shaped by the study plan and lens weights. This is passed to Proposal Service.
-- weights: Effective lens weights used to produce this refined prompt. Persisted for audit and reproducibility.
-- templateVersion: Identifier of the refinement recipe/template used (e.g., curriculum-architect-v1) to ensure reproducibility.
+- version: Contract version pin; equals 1.
+- id: Slug-safe identifier for this refinement output.
+- refined_text: Final LLM-facing prompt text for proposal generation.
+- lenses: Effective weights used to produce the refined text.
+- rationale: Short explanation of how the refinement was shaped.
+- constraints: Optional constraints list for downstream controllers.
 
 #### 3.0.3 `StudyPlanV1`
 
 ```json
 {
   "$id": "https://kmv.local/schemas/StudyPlanV1.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StudyPlanV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "goal", "modules"],
+  "required": ["version", "id", "overview", "parts"],
   "properties": {
     "version": { "const": 1 },
-    "goal": { "type": "string", "minLength": 8 },
-    "modules": {
+    "id": { "type": "string", "minLength": 8, "pattern": "^[a-z0-9\\-]{8,}$" },
+    "overview": { "type": "string" },
+    "parts": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["title", "description", "topics", "resources"],
+        "required": ["title", "chapters", "meta"],
         "properties": {
-          "title": { "type": "string", "minLength": 3 },
-          "description": { "type": "string", "minLength": 8 },
-          "topics": {
+          "title": { "type": "string" },
+          "chapters": {
             "type": "array",
-            "items": { "type": "string" },
-            "minItems": 1
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["title", "modules"],
+              "properties": {
+                "title": { "type": "string" },
+                "modules": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["title", "outcomes"],
+                    "properties": {
+                      "title": { "type": "string" },
+                      "outcomes": { "type": "array", "items": { "type": "string" } },
+                      "routing_suggestions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["topic", "folder", "filename_slug"],
+                          "properties": {
+                            "topic": { "type": "string" },
+                            "folder": { "type": "string" },
+                            "tags": { "type": "array", "items": { "type": "string" } },
+                            "filename_slug": { "type": "string", "pattern": "^[a-z0-9\\-]+$" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "cross_links": { "type": "array", "items": { "type": "string" } },
+                "prereqs": { "type": "array", "items": { "type": "string" } },
+                "flags": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": { "foundational": { "type": "boolean" } }
+                }
+              }
+            }
           },
-          "resources": {
-            "type": "array",
-            "items": { "type": "string", "format": "uri" },
-            "maxItems": 12
+          "meta": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reflection": { "type": "array", "items": { "type": "string" } },
+              "synthesis": { "type": "array", "items": { "type": "string" } }
+            }
           }
         }
       }
@@ -329,221 +380,11 @@ Field semantics — RefinedPromptV1
 
 Field semantics — StudyPlanV1
 
-- version: Contract version pin; must equal 1.
-- goal: Echo of the learning goal; aligns with RefinedPromptV1.goal.
-- modules[].title: Human-readable module name; becomes candidate H1 for generated notes.
-- modules[].description: Scope and intent of the module; used to generate rationales and tags.
-- modules[].topics: Canonical terms/subjects the module covers; map to routing topics/folders.
-- modules[].resources: Curated, bounded list of reference links; informs related_links and future reading.
-
-#### 3.1 `ProposalV1`
-
-```json
-{
-  "$id": "https://kmv.local/schemas/ProposalV1.json",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["version", "id", "target", "frontmatter", "body", "governance", "hash", "origin"],
-  "properties": {
-    "version": { "const": 1 },
-    "id": { "type": "string", "minLength": 8, "pattern": "^[a-z0-9\\-]{8,}$" },
-    "origin": { "type": "string", "enum": ["prompt", "enhancement", "health_check"] },
-    "target": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["route_id", "path"],
-      "properties": {
-        "route_id": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "pattern": "^(?!.*\\.{2})(?!\\s)(?!.*\\s$)[^\\0]+\\.md$" }
-      }
-    },
-    "frontmatter": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["title", "status"],
-      "properties": {
-        "title": { "type": "string", "minLength": 3 },
-        "status": { "type": "string", "enum": ["draft", "in-progress", "review", "published", "archived"] },
-        "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 24 },
-        "aliases": { "type": "array", "items": { "type": "string" }, "maxItems": 8 }
-      }
-    },
-    "body": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["content_md"],
-      "properties": {
-        "content_md": { "type": "string", "minLength": 1 }
-      }
-    },
-    "governance": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["related_links", "rationale"],
-      "properties": {
-        "related_links": { "type": "array", "items": { "type": "string" } },
-        "rationale": { "type": "string", "minLength": 1 }
-      }
-    },
-    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-  }
-}
-```
-
-Field semantics — ProposalV1
-
-- version: Contract version pin; must equal 1.
-- id: Client- or server-generated unique identifier (slug-safe). Used for correlation and audit lookups.
-- origin: Provenance of the proposal (prompt/enhancement/health_check) for audit segmentation and UX labeling.
-- target.route_id: Identifier of the matched routing rule; aids traceability of path decisions.
-- target.path: Final markdown path within the vault; sanitized, no traversal, `.md` enforced.
-- frontmatter.title: H1/title for the note; must match content body’s H1 on Apply.
-- frontmatter.status: Lifecycle state; governs visibility/workflows.
-- frontmatter.tags: Discovery and governance tags; capped for precision.
-- frontmatter.aliases: Alternate slugs/titles for backlink resolution.
-- body.content_md: Markdown payload (excluding frontmatter); enhancements must change body only.
-- governance.related_links: Outbound references for discovery/dup detection.
-- governance.rationale: Human-readable justification for creation/update; required for audit.
-- hash: SHA-256 over canonicalized proposal for idempotency and replay safety.
-
-#### 3.2 `ValidationReport`
-
-```json
-{
-  "$id": "https://kmv.local/schemas/ValidationReport.json",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["ok", "matched_route_id", "errors"],
-  "properties": {
-    "ok": { "type": "boolean" },
-    "matched_route_id": { "type": "string" },
-    "errors": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["code", "path", "message", "severity"],
-        "properties": {
-          "code": { "type": "string" },
-          "path": { "type": "string" },
-          "message": { "type": "string" },
-          "severity": { "type": "string", "enum": ["error", "warning"] },
-          "ruleId": { "type": "string" }
-        }
-      }
-    }
-  }
-}
-```
-
-Field semantics — ValidationReport
-
-- ok: Aggregate gate; false if any error-level issues are present.
-- matched_route_id: The route that matched the proposal path; aids UX explanations and governance checks.
-- errors[].code: Machine-readable code (e.g., SCHEMA_INVALID, ROUTING_MISMATCH) for UI remediation mapping.
-- errors[].path: JSON Pointer or field path indicating where the issue occurred.
-- errors[].message: Human-readable explanation suitable for UI.
-- errors[].severity: error blocks approval; warning permits proceed with caution.
-- errors[].ruleId: Optional internal rule identifier for telemetry and docs linking.
-
-#### 3.3 `ApplyBundleV1`
-
-```json
-{
-  "$id": "https://kmv.local/schemas/ApplyBundleV1.json",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["bundle_hash", "actions"],
-  "properties": {
-    "bundle_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "actions": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["op", "path"],
-        "properties": {
-          "op": { "type": "string", "enum": ["create", "modify", "delete", "link"] },
-          "path": { "type": "string", "pattern": "^(?!.*\\.{2})[^\\0]+$" },
-          "content": { "type": "string" },
-          "link_target": { "type": "string" },
-          "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-        }
-      }
-    }
-  }
-}
-```
-
-Field semantics — ApplyBundleV1
-
-- bundle_hash: Deterministic hash of the intended bundle; used for idempotency and observability.
-- actions[].op: Operation type — create/modify/delete/link. Only create/modify may provide content.
-- actions[].path: Target path. Must be normalized within vault; traversal and NUL rejected.
-- actions[].content: New file payload (for create/modify). Must embed frontmatter + body on create.
-- actions[].link_target: Destination path for link operations; used to create or update links.
-- actions[].content_hash: Optional content integrity guard for modify; prevents blind overwrites.
-
-#### 3.4 `AuditRecord`
-
-```json
-{
-  "$id": "https://kmv.local/schemas/AuditRecord.json",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["ts", "origin", "justification", "bundle_map", "prev_hash", "record_hash"],
-  "properties": {
-    "ts": { "type": "string", "format": "date-time" },
-    "origin": { "type": "string", "enum": ["prompt", "enhancement", "health_check"] },
-    "justification": { "type": "string" },
-    "bundle_map": { "type": "object" },
-    "prev_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "record_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-  }
-}
-```
-
-Field semantics — AuditRecord
-
-- ts: Event timestamp (UTC, ISO 8601). Must reflect append time after fsync to ensure ordering.
-- origin: Event class for audit segmentation (e.g., prompt/enhancement/health_check). If refinement events are introduced, extend enum accordingly.
-- justification: Human rationale for the action (why it was applied or proposed).
-- bundle_map: Opaque map linking bundle actions to paths and receipts; used by verifiers.
-- prev_hash: Chain pointer to previous record; ensures tamper-evident log.
-- record_hash: Current record hash; verifier recomputes and checks chain integrity.
-
-#### 3.5 `vault.json` Entry
-
-```json
-{
-  "$id": "https://kmv.local/schemas/VaultEntry.json",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["path", "title", "topic", "status", "tags", "mtime", "size", "content_hash"],
-  "properties": {
-    "path": { "type": "string" },
-    "title": { "type": "string" },
-    "topic": { "type": "string" },
-    "status": { "type": "string", "enum": ["draft", "in-progress", "review", "published", "archived"] },
-    "tags": { "type": "array", "items": { "type": "string" } },
-    "mtime": { "type": "integer" },
-    "size": { "type": "integer" },
-    "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-  }
-}
-```
-
-Field semantics — VaultEntry
-
-- path: Vault-relative file path. Serves as the primary key for entries.
-- title: Note title; typically mirrors frontmatter title/H1.
-- topic: Routing topic classification; aligns with `routing.yaml` rules.
-- status: Note lifecycle state; governs workflow and visibility.
-- tags: Supplemental classification for discovery and governance.
-- mtime: Last modification time (epoch seconds). Used for incremental indexing.
-- size: File size in bytes. Useful for performance heuristics.
-- content_hash: SHA-256 over normalized file content; enables idempotency and undo safety checks.
+- version: Contract version pin; equals 1.
+- id: Slug-safe identifier for the study plan.
+- overview: Plan summary for traceability and UX.
+- parts[].chapters[].modules[].outcomes: Learning outcomes as strings.
+- modules[].routing_suggestions[]: Optional routing hints with topic, folder, filename_slug, and optional tags.
 
 ---
 

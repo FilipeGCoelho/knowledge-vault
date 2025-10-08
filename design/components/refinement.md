@@ -25,6 +25,7 @@ Observability
 
 - Metrics: refinement_latency_ms, plan_size_chars, refined_text_size, weights_distribution, refinement_success_rate.
 - Logs: correlation_id, template_version, attempts, outcome.
+- Debug file logging (LOG_LEVEL=debug): All LLM requests/responses/errors are appended as JSONL under logs/llm/.
 
 Security Considerations
 
@@ -82,7 +83,7 @@ Ready-to-Implement Checklist
    - Log `{correlation_id, templateVersion, attempts, inputs_fingerprint}` and metrics.
    - Return `{ refinedPrompt, studyPlan }` to caller.
 
-Note: No filesystem writes.The Proposal Service consumes `refinedPrompt.refinedText` later.
+Note: No filesystem writes.The Proposal Service consumes `refinedPrompt.refined_text` later.
 
 ```mermaid
 sequenceDiagram
@@ -139,59 +140,45 @@ Output (RefinedPromptV1):
 
 ```json
 {
-    "version": 1,
-    "goal": "Learn REST API design fundamentals to build secure JSON APIs",
-    "refinedText": "You are to generate a comprehensive, structured learning proposal on REST API design fundamentals with a focus on building secure JSON APIs.Organize the material into a progressive study path that starts with HTTP and REST basics, moves through design principles and standards, covers authentication and authorization models, emphasizes API security practices (e.g., OWASP API Top 10), and concludes with documentation and testing strategies.Ensure the proposal balances pedagogical clarity (as a tutor), scientific rigor with established categories and terminology (as a publisher), and cognitive accessibility with practical examples and reflection points (as a student).Draw connections to existing references such as REST vs RPC debates and the OWASP API Security project.The output should be modular, indexed, and usable for both study and reference.",
-    "weights": { "tutor": 0.4, "publisher": 0.3, "student": 0.3 },
-    "templateVersion": "curriculum-architect-v1"
-  }
+  "version": 1,
+  "id": "abcd-efgh",
+  "refined_text": "You are to generate a comprehensive, structured learning proposal on REST API design fundamentals with a focus on building secure JSON APIs.",
+  "lenses": { "tutor": 0.4, "publisher": 0.3, "student": 0.3 },
+  "rationale": "Balances pedagogy, rigor, and accessibility",
+  "constraints": []
+}
 ```
 
-Output (StudyPlanV1 — 3 modules shown):
+Output (StudyPlanV1 — compact shape):
 
 ```json
 {
-    "version": 1,
-    "goal": "Learn REST API design fundamentals to build secure JSON APIs",
-    "modules": [
+  "version": 1,
+  "id": "abcd-efgh",
+  "overview": "Plan overview...",
+  "parts": [
+    {
+      "title": "Foundations",
+      "chapters": [
         {
-            "title": "Foundations of REST and HTTP",
-            "description": "Introduce the principles of REST architecture and the core mechanisms of HTTP as the backbone for JSON APIs.",
-            "topics": ["HTTP methods", "status codes", "REST constraints", "statelessness", "resource identification"],
-            "resources": [
-                "https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview",
-                "https://restfulapi.net/",
-                "notes/api/rest-vs-rpc.md"
-            ],
-            "routing_suggestions": [
-                { "topic": "api", "folder": "fundamentals", "tags": ["http", "rest", "architecture"], "filename_slug": "rest-http-foundations" }
-            ]
-        },
-        {
-            "title": "Designing JSON APIs",
-            "description": "Cover the fundamentals of designing clean, intuitive, and consistent JSON APIs.",
-            "topics": ["resource modeling", "naming conventions", "versioning strategies", "error handling", "HATEOAS"],
-            "resources": [
-                "https://cloud.google.com/apis/design",
-                "https://jsonapi.org/"
-            ],
-            "routing_suggestions": [
-                { "topic": "api", "folder": "design", "tags": ["json", "best-practices"], "filename_slug": "json-api-design" }
-            ]
-        },
-        {
-            "title": "Authentication and Authorization",
-            "description": "Explore methods to securely control access to APIs and user data.",
-            "topics": ["API keys", "OAuth 2.0", "JWT", "OpenID Connect", "role-based access control"],
-            "resources": [
-                "https://oauth.net/2/",
-                "https://jwt.io/introduction"
-            ],
-            "routing_suggestions": [
-                { "topic": "api", "folder": "security", "tags": ["auth", "jwt", "oauth2"], "filename_slug": "api-authentication-authorization" }
-            ]
+          "title": "HTTP & REST",
+          "modules": [
+            {
+              "title": "HTTP basics",
+              "outcomes": ["Understand methods", "Status codes"],
+              "routing_suggestions": [
+                { "topic": "api", "folder": "fundamentals", "filename_slug": "http-basics", "tags": ["http", "rest"] }
+              ]
+            }
+          ],
+          "cross_links": ["notes/api/rest-vs-rpc.md"],
+          "prereqs": [],
+          "flags": { "foundational": true }
         }
-    ]
+      ],
+      "meta": { "reflection": [], "synthesis": [] }
+    }
+  ]
 }
 ```
 
@@ -213,7 +200,8 @@ Optional module routing_suggestions (example):
 
 - Validation combines two schemas; both must pass or the request fails.
 - On failure, return HTTP 400 with a machine-readable list `{ path, message, code: "SCHEMA_INVALID" }` and a human tip.
-- During the single retry, the repair guidance includes the minimal diff needed (e.g., missing field, wrong enum).
+- During the single retry, the repair guidance includes the minimal diff needed (e.g., missing field, wrong enum) and an explicit list of additional_properties_to_remove with exact JSON Pointer-like paths when additionalProperties violations occur.
+- Optional auto-strip: when `autoStripAdditionalProps=true` (query/body) or env `REFINE_AUTO_STRIP_ADDITIONAL_PROPS=true`, the service will strip additional properties and, if the sanitized payloads validate, return them instead of failing.
 
 ## Emitted Metrics & Logs per Step
 
@@ -236,12 +224,12 @@ Optional module routing_suggestions (example):
 - Language/Runtime: Node.js (>=18), TypeScript strict mode.
 - HTTP Endpoint: POST `/refine` in local API (Express). Returns `{ refinedPrompt, studyPlan }`.
 - Contracts: Ajv strict validation against `PromptRefinementInput`, `RefinedPromptV1`, `StudyPlanV1`.
+- Prompt spec: The strict output specification embedded in the system prompt is rendered dynamically at runtime from the live JSON Schemas to avoid drift; the system prompt text is stored at `design/prompts/refinement-llm-system-prompt.md` and loaded at runtime (with a graceful fallback string).
 - DI & Adapters: `LLMAdapter` interface with `MockLLMAdapter` default for local/offline tests.
-- Repair Loop: Single retry with targeted guidance using Ajv error pointers.
+- Repair Loop: Single retry with targeted guidance using Ajv error pointers and explicit additional-properties paths.
 - Timeouts/Backoff: 8 s default timeout; single retry for 429 with jittered backoff.
 - Security: Inputs validated, outputs ephemeral, logs redacted (no payloads), no persistence.
-- Observability: Pino JSON logs with `correlation_id`; Prometheus metrics `/metrics` endpoint.
-- Performance: Mock adapter returns instantly; real adapter must meet p90 ≤ 16 s budget.
+- Observability: Pino JSON logs with `correlation_id`; Prometheus metrics `/metrics`; JSONL LLM logs under `logs/llm` in debug mode.
 
 ## Runbook (Local)
 

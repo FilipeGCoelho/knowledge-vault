@@ -57,30 +57,35 @@ Return one JSON object with two top-level fields: "refinedPrompt" and "studyPlan
 
 - refinedPrompt (RefinedPromptV1):
   - version: 1
-  - goal: string (normalized/clarified goal)
-  - refinedText: string (final LLM-ready prompt that will drive Proposal generation for notes)
-  - weights: object with numeric lens weights actually used (e.g., {"tutor":0.34,"publisher":0.33,"student":0.33})
-  - templateVersion: "curriculum-architect-v1"
+  - id: string (pattern ^[a-z0-9\-]{8,}$)
+  - refined_text: string (final LLM-ready prompt that will drive Proposal generation for notes)
+  - lenses: object with numeric lens weights actually used {"tutor":number,"publisher":number,"student":number} with values in [0,1]
+  - rationale: string (why this shaping was chosen)
+  - constraints: array of strings (optional)
 
 - studyPlan (StudyPlanV1):
   - version: 1
-  - goal: string (must echo refined goal)
-  - modules: array of objects. Each module:
-    - title: string (module name)
-    - description: string (scope and learning intent)
-    - topics: array of strings (canonical terms/subjects)
-    - resources: array of URIs (max 12)
-    - optional routing_suggestions: array of objects to assist downstream note creation:
-      - topic: string (routing topic)
-      - folder: string (destination folder within topic)
-      - tags: array of strings
-      - filename_slug: string (kebab-case, [a-z0-9-]+)
+  - id: string (pattern ^[a-z0-9\-]{8,}$)
+  - overview: string (plan summary and scope)
+  - parts: array of objects. Each part:
+    - title: string
+    - chapters: array of objects. Each chapter:
+      - title: string
+      - modules: array of objects. Each module:
+        - title: string
+        - outcomes: array of strings
+        - routing_suggestions (optional): array of objects with:
+          - topic: string
+          - folder: string
+          - filename_slug: string (kebab-case, [a-z0-9-]+)
+          - tags (optional): array of strings
+    - meta: object with optional arrays: reflection[], synthesis[]
 
 Validation rules:
 
 - JSON only; UTF-8; no comments; no extra fields beyond those specified.
 - Keep strings concise and unambiguous; use standard terminology.
-- Ensure at least 3–6 modules, unless the goal is extremely narrow.
+- Ensure at least one part, one chapter per part, and one module per chapter.
 - Prefer balanced coverage; avoid redundancy across modules.
 
 ## Example skeleton (structure only; values are placeholders)
@@ -89,23 +94,34 @@ Validation rules:
 {
   "refinedPrompt": {
     "version": 1,
-    "goal": "<normalized goal>",
-    "refinedText": "<final LLM-facing prompt>",
-    "weights": { "tutor": 0.34, "publisher": 0.33, "student": 0.33 },
-    "templateVersion": "curriculum-architect-v1"
+    "id": "mockid1234",
+    "refined_text": "<final LLM-facing prompt>",
+    "lenses": { "tutor": 0.34, "publisher": 0.33, "student": 0.33 },
+    "rationale": "<brief rationale>",
+    "constraints": []
   },
   "studyPlan": {
     "version": 1,
-    "goal": "<normalized goal>",
-    "modules": [
+    "id": "mockid1234",
+    "overview": "<overview>",
+    "parts": [
       {
-        "title": "<Module 1>",
-        "description": "<scope>",
-        "topics": ["<term1>", "<term2>"];
-        "resources": ["https://..."],
-        "routing_suggestions": [
-          { "topic": "api", "folder": "design", "tags": ["best-practices"], "filename_slug": "api-design-principles" }
-        ]
+        "title": "<Part 1>",
+        "chapters": [
+          {
+            "title": "<Chapter 1>",
+            "modules": [
+              {
+                "title": "<Module 1>",
+                "outcomes": ["<Outcome 1>"] ,
+                "routing_suggestions": [
+                  { "topic": "api", "folder": "design", "filename_slug": "api-design-principles", "tags": ["best-practices"] }
+                ]
+              }
+            ]
+          }
+        ],
+        "meta": { "reflection": [], "synthesis": [] }
       }
     ]
   }

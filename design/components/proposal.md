@@ -6,7 +6,7 @@ Generate ProposalV1 from prompt/context (or refined prompt), parse to schema, an
 
 Inputs / Outputs (Contracts)
 
-- Input: prompt string (+ optional contextRefs)
+- Input: `{ prompt: string, contextRefs?: string[] }` OR `{ refined_text: string }` (preferred). For backward compatibility, `{ refinedText: string }` MAY be accepted temporarily by an adapter layer.
 - Output: `contracts/ProposalV1.schema.json` (ProposalV1)
 
 Interfaces
@@ -54,12 +54,12 @@ Ready-to-Implement Checklist
 ## End-to-end Information Flow (Prompt → ProposalV1)
 
 1) Receive request (POST /proposal)
-   - Input: `{ prompt: string, contextRefs?: string[] }` or `{ refinedText: string }` from the Refinement Service.
+   - Input: `{ prompt: string, contextRefs?: string[] }` or `{ refined_text: string }` from the Refinement Service.
    - Normalize: trim strings, enforce UTF-8, limit contextRefs count/length, and dedupe.
 
 2) Compose provider call
    - System content: strict instructions describing the ProposalV1 schema (names only) and rules (frontmatter, path, governance fields).
-   - User content: the prompt/refinedText plus any relevant contextRefs.
+   - User content: the `prompt` or `refined_text` (normalized) plus any relevant `contextRefs`.
 
 3) Call LLM (LLM adapter)
    - Enforce timeouts (p50 8 s, p90 16 s), retry/backoff on 429; cap at ≤ 2 attempts total.
@@ -90,8 +90,8 @@ sequenceDiagram
   participant UI as UI
   participant API as Proposal
   participant LLM as LLM Adapter
-  UI->>API: POST /proposal {prompt, contextRefs}
-  API->>LLM: complete(instructions + prompt)
+  UI->>API: POST /proposal {prompt|refined_text, contextRefs}
+  API->>LLM: complete(instructions + prompt/refined_text)
   LLM-->>API: JSON ProposalV1
   API->>API: validate + canonicalize + sha256
   API-->>UI: ProposalV1 (with proposal_hash)
@@ -100,8 +100,8 @@ sequenceDiagram
 ## Deterministic Algorithm (Step-by-step)
 
 - Inputs normalization
-  - prompt/refinedText: string ≥ 8 chars; collapse whitespace.
-  - contextRefs: ≤ 8 items; strings; dedupe; may include vault-relative paths or URLs.
+  - `prompt`/`refined_text`: string ≥ 8 chars; collapse whitespace. Normalize `{ refinedText }` → `{ refined_text }` if provided.
+  - `contextRefs`: ≤ 8 items; strings; dedupe; may include vault-relative paths or URLs.
 
 - Provider instruction strategy
   - Include concise schema summary and invariants (e.g., path must be `.md`, frontmatter fields, governance.rationale non-empty).
@@ -137,6 +137,14 @@ Example input (prompt):
 {
   "prompt": "Create a new note that introduces REST vs RPC trade-offs and links to two reference resources.",
   "contextRefs": ["notes/api/rest-vs-rpc.md", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods"]
+}
+```
+
+Example input (refined):
+
+```json
+{
+  "refined_text": "You are to generate a comprehensive ..."
 }
 ```
 
