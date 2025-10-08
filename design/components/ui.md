@@ -49,6 +49,28 @@ Journeys
 - Goal: inspect chain of actions and manage providers.
 - Success: clear lineage, provider test succeeds, secrets never displayed.
 
+## Information Architecture & Navigation
+
+Layout
+
+- Global shell: Header (App title, Settings), Main (content), Aside (context/validation), Footer (status).
+- Navigation: Tabs or left-nav for primary areas (Refinement, Proposal, Inventory, Audit, Settings).
+- Responsive behavior: breakpoints at 1280/960/600px; panels stack vertically on narrow viewports.
+
+Routing
+
+- /refine: Prompt Refinement
+- /proposal: Proposal Viewer & Validator
+- /apply (modal route): Apply confirmation overlay
+- /inventory: Vault inventory & reindex controls
+- /audit: Audit log
+- /settings: Provider & vault settings
+
+Interaction Hierarchy
+
+- Primary actions per screen emphasized (Refine, Validate/Generate, Approve, Apply).
+- Destructive actions require explicit confirmation and secondary affordance.
+
 ## Screen-by-Screen Specifications
 
 Note: Components listed with purpose, key props, states, events. All component names are indicative and may be mapped to your design system.
@@ -82,6 +104,13 @@ Behavior
 - On success: render studyPlan, refinedPrompt; enable “Send to Proposal”.
 - On error: show structured pointers; highlight fields; allow rerun.
 
+States
+
+- Empty: placeholder guidance with example goals; disabled actions until valid.
+- Loading: skeletons for StudyPlanView and RefinedPromptView; spinner on button.
+- Error: inline alert with Ajv pointers; link to copy diagnostics.
+- Offline: banner; Refine disabled; allow local editing of goal/weights.
+
 1. Proposal Viewer & Validator
 
 Purpose: Generate and inspect ProposalV1 from `prompt` or `refined_text`.
@@ -108,6 +137,13 @@ Behavior
 - Surface route match and reasons; block Approve on invalid.
 - Provide copy-to-clipboard for diagnostics on malformed output.
 
+States
+
+- Empty: prompt/refined input area with tips; Approve disabled.
+- Loading: skeleton for DiffViewer; progress indicator for validation.
+- Error: structured list of schema pointers; route mismatch hints.
+- Offline: banner; generation disabled; show last valid proposal if cached.
+
 1. Apply Confirmation & Receipts
 
 Purpose: Confirm irreversible writes; execute atomic Apply and display results.
@@ -126,6 +162,13 @@ Behavior
 - Show explicit confirmation checkbox + modal.
 - On success: list receipts; link to affected paths; show post-Apply validation summary.
 
+States
+
+- Empty: modal closed; no receipts.
+- Loading: spinner during Apply; disable controls.
+- Error: show failure reason; allow retry/cancel.
+- Success: receipts table; toast confirmation.
+
 1. Inventory & Reindex
 
 Purpose: Visualize vault state and trigger scans.
@@ -138,6 +181,12 @@ Key Components
   - Buttons: Full Scan, Incremental
   - Telemetry: files_per_sec, changed_count
 
+States
+
+- Empty: none
+- Loading: progress bar with ETA.
+- Error: actionable message; retry.
+
 1. Audit Viewer
 
 Purpose: Inspect append-only audit chain with hash pointers.
@@ -148,6 +197,12 @@ Key Components
   - Props: records {ts, origin, justification, prev_hash, record_hash}
 - RecordDetail
   - Props: selectedRecord with bundle map and receipts
+
+States
+
+- Empty: “No audit records yet.”
+- Loading: skeleton rows.
+- Error: message with retry.
 
 1. Settings
 
@@ -160,6 +215,13 @@ Key Components
   - Actions: Test Call (never logs secrets)
 - VaultConfig
   - Fields: vault path, time zone/locale
+
+States
+
+- Empty: defaults shown; masked secrets.
+- Loading: while testing provider.
+- Error: crisp reason (no secrets); remediation hints.
+- Success: “Provider OK” with timestamp.
 
 ## Interaction & Accessibility Guidelines
 
@@ -262,6 +324,38 @@ Acceptance Criteria
 - All A11y tests pass (no critical violations).
 - Core flows complete within target budgets (p50/p90).
 - Validation messaging meets precision and remediation standards.
+
+## Per-Flow Acceptance Criteria & UX Metrics
+
+Refinement
+
+- Inputs validated client-side (minLength, weights range) before POST.
+- time_to_first_valid_refinement_ms within targets; refinement_success_rate tracked.
+- Empty/loading/error/offline states exercised in tests.
+
+Proposal
+
+- refined_text handoff path verified (Refine → Proposal prefill).
+- Approve disabled until ok=true; route explanation visible.
+- time_to_first_valid_proposal_ms within targets; proposal_validation_errors_total tracked.
+
+Apply
+
+- Confirm checkbox gate enforced; modal focus trapped.
+- Receipts rendered; post-Apply validation summary present.
+- apply_duration_ms within targets; apply_success_rate tracked.
+
+Audit & Settings
+
+- Audit chain renders with record hashes; details view accessible.
+- Provider Test Call returns clear pass/fail; secrets masked.
+
+## Security Considerations (UI)
+
+- CSRF protection for mutations; same-site cookies.
+- Secrets never rendered; inputs for keys masked; copy disabled.
+- No logging of secrets client-side; redact any sensitive values.
+- Strict content security policy; disallow inline scripts; sanitize user input.
 
 ## Traceability Matrix
 
