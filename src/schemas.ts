@@ -8,6 +8,15 @@ import PromptRefinementInputSchema from '../contracts/PromptRefinementInput.sche
 import RefinedPromptV1Schema from '../contracts/RefinedPromptV1.schema.json';
 import StudyPlanV1Schema from '../contracts/StudyPlanV1.schema.json';
 
+// Export raw schemas for dynamic consumers
+export function getRawSchemas() {
+  return {
+    PromptRefinementInputSchema,
+    RefinedPromptV1Schema,
+    StudyPlanV1Schema
+  } as const;
+}
+
 // TypeScript interfaces aligned with schemas (compile-time helpers)
 export interface PromptRefinementInput {
   goal: string;

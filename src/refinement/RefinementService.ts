@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-import { SchemaValidators, canonicalJson, loadTemplateVersioned, PromptRefinementInput, RefinedPromptV1, StudyPlanV1 } from '../schemas';
+import { SchemaValidators, canonicalJson, loadTemplateVersioned, PromptRefinementInput, RefinedPromptV1, StudyPlanV1, getRawSchemas } from '../schemas';
 import type { LLMAdapter } from '../adapters/llm/LLMAdapter';
 
 export type RefinementResult = { refinedPrompt: RefinedPromptV1; studyPlan: StudyPlanV1; attempts: number };
@@ -283,43 +283,52 @@ export class RefinementService {
 
   private composePrompt(input: PromptRefinementInput): { prompt: string; weights: Record<string, number> } {
     const { templateVersion } = this.template;
-    const weights = input.lensWeights && Object.keys(input.lensWeights).length > 0 ? input.lensWeights : { tutor: 1 / 3, publisher: 1 / 3, student: 1 / 3 };
+    const weights = input.lensWeights && Object.keys(input.lensWeights).length > 0
+      ? input.lensWeights
+      : { tutor: 1 / 3, publisher: 1 / 3, student: 1 / 3 };
 
     const header = `SYSTEM_TEMPLATE: ${templateVersion}`;
+
+    const { RefinedPromptV1Schema, StudyPlanV1Schema } = getRawSchemas() as any;
+    const render = (schema: any, indent = '    '): string => {
+      if (!schema || typeof schema !== 'object') return '';
+      const lines: string[] = [];
+      const type = schema.type;
+      if (type === 'object' && schema.properties) {
+        lines.push('{');
+        const keys = Object.keys(schema.properties);
+        for (const key of keys) {
+          const prop = schema.properties[key];
+          const t = prop?.type || (prop?.const !== undefined ? 'const' : Array.isArray(prop?.anyOf) ? 'anyOf' : 'any');
+          if (t === 'object') {
+            lines.push(`${indent}"${key}": object ${render(prop, indent + '  ')}`);
+          } else if (t === 'array') {
+            lines.push(`${indent}"${key}": array [ ${render(prop.items, indent + '  ')} ]`);
+          } else if (prop?.const !== undefined) {
+            lines.push(`${indent}"${key}": const ${JSON.stringify(prop.const)}`);
+          } else if (prop?.pattern) {
+            lines.push(`${indent}"${key}": ${t} (pattern ${prop.pattern})`);
+          } else {
+            lines.push(`${indent}"${key}": ${t}`);
+          }
+        }
+        lines.push(indent.slice(0, -2) + '}');
+        return lines.join('\n');
+      }
+      if (type === 'array' && schema.items) {
+        return render(schema.items, indent + '  ');
+      }
+      return String(type || 'any');
+    };
 
     const strictSpec = [
       'STRICT_OUTPUT_SPEC:',
       '- Return ONLY a JSON object with keys {"refinedPrompt","studyPlan"}.',
       '- No markdown fences, no commentary.',
-      '- refinedPrompt: object with ALL required fields:',
-      '    {',
-      '      "version": 1,',
-      '      "id": string (^[a-z0-9\\-]{8,}$),',
-      '      "refined_text": string,',
-      '      "lenses": object,',
-      '      "rationale": string',
-      '    }',
-      '- studyPlan: object with ALL required fields (see current StudyPlanV1 schema):',
-      '    {',
-      '      "version": 1,',
-      '      "id": string (^[a-z0-9\\-]{8,}$),',
-      '      "overview": string,',
-      '      "parts": [ {',
-      '        "title": string,',
-      '        "chapters": [ {',
-      '          "title": string,',
-      '          "modules": [ {',
-      '            "title": string,',
-      '            "outcomes": string[],',
-      '            "routing_suggestions"?: [ { "topic": string, "folder": string, "tags"?: string[], "filename_slug": string (^[a-z0-9\\-]+$) } ]',
-      '          } ],',
-      '          "cross_links"?: string[],',
-      '          "prereqs"?: string[],',
-      '          "flags"?: { "foundational"?: boolean }',
-      '        } ],',
-      '        "meta": { "reflection"?: string[], "synthesis"?: string[] }',
-      '      } ]',
-      '    }',
+      '- refinedPrompt (RefinedPromptV1):',
+      render(RefinedPromptV1Schema, '    '),
+      '- studyPlan (StudyPlanV1):',
+      render(StudyPlanV1Schema, '    '),
       '- DO NOT include any additional properties beyond those listed above.',
       '- Field names and types must match exactly.',
       '- If unsure, return a minimal valid output with all required fields.'
