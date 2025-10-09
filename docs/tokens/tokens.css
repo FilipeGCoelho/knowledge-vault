@@ -1,0 +1,30 @@
+:root {
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  --font-family-base: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-size-12: 12px;
+  --font-size-14: 14px;
+  --font-size-16: 16px;
+  --font-size-18: 18px;
+  --font-size-20: 20px;
+  --font-size-24: 24px;
+  --font-size-32: 32px;
+  --font-size-48: 48px;
+
+  --color-bg: #FFFFFF;
+  --color-surface: #FAFAFA;
+  --color-text: #111111;
+  --color-muted: #666666;
+  --color-brand: #2D6CDF;
+  --color-info: #1477D2;
+  --color-success: #2E7D32;
+  --color-warning: #ED6C02;
+  --color-danger: #D32F2F;
+}

@@ -1,83 +1,134 @@
-# Prompt — Generate Refined `ui.md`
+# Prompt — Generate Refined UI Documentation Suite
 
-You are a **Principal Product Designer and Senior UX Architect** specialized in **technical, structured products built with Next.js and React**.
+You are a **Principal Product Designer and Senior UX Architect** specialized in **structured technical products built with Next.js and React**.
 
-Your task is to **rewrite and enhance the existing `ui.md` file** for the KMV Console so that it becomes a **world-class UI/UX specification document** ready for direct implementation and testing.
-
-## Core Objective
-
-Transform the current `ui.md` (provided below) into a **refined, complete, markdownlint-compliant `ui.md` file** that embodies **human-centered design**, **accessibility**, and **testable UX** best practices.
-
-Your rewritten file must replace the existing one and become the authoritative UI specification for the KMV Console.
+Your task is to **analyze and rewrite the existing UI documentation suite** for the KMV Console — now distributed under `docs/ui/` — to produce a **world-class, implementation-ready, testable UI specification set**. This replaces the legacy monolithic `ui.md` with a **multi-file, principle-driven system** that directly informs design, implementation, accessibility, observability, and verification.
 
 ---
 
-## Inputs
+## Core Objective
 
-1. The current `ui.md` content (baseline structure and purpose).  
-2. The `requirements.md` file (functional and non-functional scope).  
-3. The `system-design.md` file (technical scope).  
-4. Additional design documents that give additional context on what is being built.  
+Transform the current modular UI documentation under `docs/ui/` into a **complete, coherent, and human-centered specification** that unifies design, architecture, implementation, accessibility, observability, and testing standards.
+
+The goal is to produce a **refined suite of markdown documents** that:
+
+- Accurately represent the KMV Console’s UI system.
+- Are **internally consistent**, **lint-compliant**, and **ready for direct developer use**.
+- Uphold **traceability** between requirements, system design, and test criteria.
+
+---
+
+## Current Structure (Input Context)
+
+The documentation suite currently includes:
+
+```text
+docs/ui/
+├── ui-principles.md
+├── ui-architecture.md
+├── ui-implementation.md
+├── ui-observability.md
+├── ui-verification.md
+├── ui-security.md
+└── components/
+    ├── Refinement.md
+    └── Proposal.md
+```
+
+Supplementary materials:
+
+- `docs/tokens/tokens.json`, `docs/tokens/tokens.css`
+- `docs/ux-adrs/*.md` (navigation, client-only policy)
+- `design/components/ui.md` (legacy baseline reference)
+- `requirements.md` and `system-design.md` (authoritative scope and constraints)
 
 ---
 
 ## Your Responsibilities
 
-1. **Preserve structure → elevate clarity.**
-   - Keep the same general organization (Purpose, Screens, Accessibility, Observability, etc.), but expand each section to reflect:
-     - Actual **user journeys** derived from requirements (Refinement → Proposal → Apply → Audit → Settings).
-     - **Information architecture** and **interaction hierarchy**.
-     - **Visual rhythm** and design-system intent.
+### 1. Audit → Unify → Refine
 
-2. **Apply best-practice UX design documentation standards.**
-   - Reference **WCAG 2.2 AA**, **ISO 9241-210**, **ISO/IEC 25010**, and **Nielsen heuristics**.
-   - Explicitly describe **keyboard navigation**, **focus order**, **ARIA live region use**, and **error messaging language**.
-   - Define **empty states, loading states, offline behavior**, and **feedback patterns**.
-   - Use clear “As a user, I expect…” phrasing where relevant.
+- Read all files under `docs/ui/` and cross-reference with `design/components/ui.md`, `requirements.md`, and `system-design.md`.
+- Identify inconsistencies, redundancies, or missing links between principles, architecture, and implementation.
+- Rewrite and harmonize the files so the suite expresses **one unified UI doctrine**, covering purpose, flows, principles, and measurable outcomes.
 
-3. **Describe components and interactions precisely.**
-   - For each major screen, define its **purpose**, **key components**, **primary user actions**, and **success/error flows**.
-   - Include named components (`PromptPane`, `DiffViewer`, `ApplyModal`, etc.) with their **expected props, states, and transitions**.
-   - Integrate **observability metrics** (UX and performance).
+### 2. Strengthen Each File’s Purpose
 
-4. **Make it testable and traceable.**
-   - Provide **acceptance criteria** and **UX metrics** for each flow (e.g., `time_to_task_completion_ms`, `ui_a11y_violations_total`).
-   - Include a **traceability matrix** linking UI areas to requirements (§3–§4 in `requirements.md`).
-   - Ensure every criterion is measurable or verifiable via test, inspection, or telemetry.
+Refactor the suite into self-contained but interconnected documents:
 
-5. **Use concise, implementation-ready Markdown.**
-   - No meta commentary or explanation of your reasoning.
-   - Use headings, bullet lists, and tables cleanly (markdownlint-ready).
-   - The output must be the **final rewritten `ui.md` file**, not analysis text.
+| File | Purpose | Required Content |
+|------|---------|------------------|
+| ui-principles.md | Visual & interaction philosophy | Neutral low-chroma palette, 8px grid, typography, motion, accessibility, content voice, and mapping to tokens. |
+| ui-architecture.md | Layout & navigation structure | Global shell, IA, routing map, breakpoints, tabs/rail, and information hierarchy. |
+| ui-implementation.md | Technical wiring | Next.js layout policy, hydration/SSR approach, API integration, environment configuration. |
+| ui-observability.md | UX metrics & telemetry | Key events, performance metrics, correlation with backend, measurement plan. |
+| ui-verification.md | Testing & acceptance | Accessibility, UX, and E2E test plans, budgets, criteria. |
+| ui-security.md | UI privacy & hardening | CSP, secret redaction, safe rendering, CSRF. |
+| components/* | Screen-level specs | For each flow (Refinement, Proposal, Apply, Audit, Settings, Inventory) — purpose, components, props, states, events, a11y, error/loading/offline states, UX metrics. |
+
+### 3. Apply Enterprise-grade UX & Accessibility Standards
+
+- Align with **WCAG 2.2 AA**, **ISO 9241-210**, **ISO/IEC 25010**, **Nielsen heuristics**.
+- Define keyboard focus order, ARIA usage, live regions, validation semantics, and contrast thresholds.
+- Make accessibility **auditable** and **measurable** (testing and telemetry).
+
+### 4. Reinforce Testability & Traceability
+
+- Ensure every file includes **explicit acceptance criteria** and **UX/performance metrics**.
+- Add **traceability tables** linking `requirements.md` → `system-design.md` → `docs/ui/*`.
+- Reference relevant ADRs (e.g., client-only rendering, navigation model).
+
+### 5. Integrate Design Tokens
+
+- Reference `docs/tokens/tokens.json` and `docs/tokens/tokens.css` in `ui-principles.md` and `ui-implementation.md`.
+- Ensure tokens are semantic/role-based (e.g., bg/surface/text/muted/brand/info/success/warning/danger) and follow the 8px grid.
+
+### 6. Produce Clean, Implementation-Ready Markdown
+
+- Markdownlint-compliant (heading order, tables, fenced code blocks, spacing).
+- No reasoning/meta commentary — deliver finalized docs only.
+- Include a “Last Updated: YYYY-MM-DD” footer on each file.
 
 ---
 
-## Output Format
+## Output Expectations
 
-Output **only one file**, titled `ui.md`, containing the enhanced, professional-grade UI/UX documentation.  
-It must include, in this order:
+Produce a **complete, rewritten documentation suite** (one file per document listed above), with consistent cross-links and a shared tone.
+
+Each file must include:
 
 1. **Purpose & Responsibilities**
-2. **Primary User Journeys & Personas**
-3. **Screen-by-Screen Specifications**
-4. **Interaction & Accessibility Guidelines**
-5. **Design System Mapping**
-6. **Observability & UX Metrics**
-7. **Test Plan (A11y / UX / E2E)**
-8. **Traceability Matrix**
-
-Each section should be actionable, testable, and implementation-ready.
+2. **Scope & Context**
+3. **Core Principles / Patterns**
+4. **Implementation or Behavioral Details**
+5. **Accessibility & Interaction Rules**
+6. **Observability Metrics or Acceptance Criteria**
+7. **Traceability / Related ADRs**
+8. **Footer (Last Updated)**
 
 ---
 
 ## Evaluation Criteria
 
-- ✅ Comprehensive — covers all user flows described in `requirements.md`.  
-- ✅ Accessible — explicit WCAG 2.2 AA measures.  
-- ✅ Testable — acceptance criteria and metrics defined.  
-- ✅ Consistent — aligns with system design, tone, and structure of other KMV docs.  
-- ✅ Developer-usable — no ambiguity or prose fluff.  
+- ✅ Comprehensive — covers all flows from `requirements.md` and visual/interaction principles.
+- ✅ Accessible — explicit WCAG 2.2 AA coverage and measurable contrast/focus rules.
+- ✅ Testable — each flow/principle tied to observable metrics or criteria.
+- ✅ Traceable — references to requirements, system design, and ADRs.
+- ✅ Consistent — unified voice and formatting; tokens integrated.
+- ✅ Implementation-ready — developers can implement directly with no ambiguity.
 
 ---
 
-## Source for Enhancement
+## Inputs To Use
+
+- `docs/ui/*.md`, `docs/ui/components/*.md`
+- `docs/tokens/tokens.json`, `docs/tokens/tokens.css`
+- `docs/ux-adrs/*.md`
+- `design/components/ui.md`
+- `requirements.md`, `system-design.md`
+
+---
+
+## Final Deliverable
+
+A cohesive, professional, markdownlint-compliant **UI documentation suite** — multiple files that supersede the old monolithic `ui.md` — each file testable, traceable, and implementation-ready.

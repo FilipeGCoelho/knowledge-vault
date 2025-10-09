@@ -58,3 +58,6 @@ diagnostics.json
 
 # ignore folder
 /ignore/
+
+#Design PNGs
+/design/**/*.png
