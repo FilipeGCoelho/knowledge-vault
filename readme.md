@@ -98,6 +98,72 @@ See [test plan and budgets](design/system-design.md#10-performance-engineering--
 
 ---
 
+## Running the Web Application & Testing
+
+### Prerequisites
+
+- Node.js >= 18.x
+- npm >= 9.x
+
+### Install dependencies
+
+```sh
+npm install
+```
+
+### Start the local API server
+
+```sh
+npm run dev
+```
+
+- The API server will start on `localhost:3000` (or as configured).
+
+### Start the UI (Next.js)
+
+If you have a Next.js UI in `src/ui` or a separate folder, run:
+
+```sh
+npm run ui
+```
+
+- (If not present, see `design/components/ui.md` for implementation instructions.)
+
+### Run all tests (unit, integration, UI)
+
+```sh
+npm test
+```
+
+- Uses Vitest for all test suites.
+
+- For watch mode:
+
+```sh
+npm run test:watch
+```
+
+### Lint and typecheck
+
+```sh
+npm run lint
+npm run typecheck
+```
+
+### Troubleshooting
+
+- If you see missing dependencies, run `npm install` again.
+- For schema validation errors, check your contract types and JSON schemas in `contracts/`.
+- For UI issues, see `design/components/ui.md` and ensure all required React/Next.js dependencies are installed.
+
+### Additional resources
+
+- [UI/UX spec](design/components/ui.md)
+- [System design](design/system-design.md)
+- [Component docs](design/components/README.md)
+
+---
+
 ## Visual polish tips for README render on GitHub
 
 - SVG diagrams are embedded for guaranteed rendering. Keep them concise and readable.

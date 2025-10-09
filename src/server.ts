@@ -1,6 +1,24 @@
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+// Load env from .env.local if present; fallback to .env
+(() => {
+  try {
+    const envLocal = path.resolve(process.cwd(), '.env.local');
+    if (fs.existsSync(envLocal)) {
+      dotenv.config({ path: envLocal });
+    } else {
+      dotenv.config();
+    }
+  } catch {
+    // ignore
+  }
+})();
+
 import express, { Request, Response, NextFunction } from 'express';
 import pino from 'pino';
 import { Histogram, Registry, collectDefaultMetrics, Gauge, Counter } from 'prom-client';
+import crypto from 'crypto';
 
 import { MockLLMAdapter } from './adapters/llm/MockLLMAdapter';
 import { OpenAIAdapter } from './adapters/llm/OpenAIAdapter';
@@ -8,6 +26,19 @@ import { RefinementService, RefinementError } from './refinement/RefinementServi
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+
+// CORS for local UI (Next.js dev on 4000). Adjust origin as needed.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (!origin || origin === 'http://localhost:4000') {
+    res.header('Access-Control-Allow-Origin', 'http://localhost:4000');
+    res.header('Vary', 'Origin');
+  }
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Correlation-Id');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
@@ -66,7 +97,14 @@ app.post('/refine', async (req: Request, res: Response) => {
   try {
     const autoStripParam = String((req.query.autoStripAdditionalProps ?? req.body?.options?.autoStripAdditionalProps ?? '')).toLowerCase();
     const autoStrip = autoStripParam === 'true' || autoStripParam === '1' || autoStripParam === 'yes';
-    const result = await service.refine(req.body, correlationId, { autoStripAdditionalProps: autoStrip });
+    // Sanitize input to schema-allowed keys only to avoid additionalProperties errors
+    const input = {
+      goal: req.body?.goal,
+      contextRefs: req.body?.contextRefs,
+      // Schema expects 'weights' not 'lensWeights'
+      weights: req.body?.lensWeights || req.body?.weights
+    } as any;
+    const result = await service.refine(input, correlationId, { autoStripAdditionalProps: autoStrip });
     const duration = Date.now() - start;
     refineLatency.observe(duration);
     attemptsCounter.inc(result.attempts);
@@ -113,6 +151,33 @@ app.post('/refine', async (req: Request, res: Response) => {
 
     logger.error({ correlation_id: correlationId, err }, 'unexpected error');
     res.status(500).json({ code: 'INTERNAL', message: 'Unexpected error' });
+  }
+});
+
+// Minimal Proposal endpoint to unblock UI integration
+app.post('/proposal', async (req: Request, res: Response) => {
+  try {
+    const { prompt, refined_text } = req.body || {};
+    const text: string | undefined = refined_text || prompt;
+    if (!text || typeof text !== 'string' || text.trim().length < 8) {
+      return res.status(400).json({ code: 'SCHEMA_INVALID', message: 'prompt/refined_text must be a string with minLength 8' });
+    }
+    const canonical = text.trim();
+    const hash = crypto.createHash('sha256').update(canonical).digest('hex');
+    const id = `proposal-${randomId()}`;
+    const proposal = {
+      version: 1 as const,
+      id,
+      origin: 'prompt' as const,
+      target: { route_id: 'unknown', path: 'drafts/temp.md' },
+      frontmatter: { title: 'Draft', status: 'draft', tags: [], aliases: [] },
+      body: { content_md: canonical },
+      governance: { related_links: [], rationale: 'Auto-generated preview' },
+      hash
+    };
+    return res.status(200).json({ proposal });
+  } catch (err) {
+    return res.status(500).json({ code: 'INTERNAL', message: 'Unexpected error' });
   }
 });
 

@@ -83,7 +83,7 @@ Each service lists **I/O contracts**, **happy path**, **failure modes**, **timeo
 
 #### 2.3.0 Prompt Refinement Service
 
-- **In:** `PromptRefinementInput` (goal, optional contextRefs, lens weights).  
+- **In:** `PromptRefinementInput` (goal, optional contextRefs, weights).  
 - **Out:** `RefinedPromptV1` and `StudyPlanV1` (no writes).  
 - **Happy path:** Apply the curriculum-architect template; strict-parse outputs; format-repair loop (≤ 2); return structured plan and refined prompt.  
 - **Failure modes:** `LLM_TIMEOUT`, `LLM_429`, `LLM_MALFORMED`.  
@@ -212,7 +212,7 @@ sequenceDiagram
 
 ### 2.5 Deployment View (Local)
 
-- **Mode A — Local web server (v1):** UI served at `localhost`; keys derived at runtime and stored in a user-accessible config folder with restricted permissions. Native OS pickers via browser file input APIs.  
+- **Mode A — Local web server (v1):** UI served at `localhost`; API serves JSON. API loads environment from `.env.local` (via `dotenv`) at repo root for secrets (e.g., `OPENAI_API_KEY`). UI reads non-secret `NEXT_PUBLIC_API_BASE` from `ui/.env.local`. CORS allows `http://localhost:4000`.  
 - **Mode B — Desktop shell (deferred):** Would enable better key handling (OS keychain) and system file pickers. ADR in §12.
 
 ---
@@ -228,21 +228,21 @@ sequenceDiagram
 ```json
 {
   "$id": "https://kmv.local/schemas/PromptRefinementInput.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PromptRefinementInput",
   "type": "object",
   "additionalProperties": false,
   "required": ["goal"],
   "properties": {
     "goal": { "type": "string", "minLength": 8 },
-    "contextRefs": {
-      "type": "array",
-      "items": { "type": "string" },
-      "maxItems": 8
-    },
-    "lensWeights": {
+    "contextRefs": { "type": "array", "items": { "type": "string" }, "maxItems": 8 },
+    "weights": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": {
-        "^[a-zA-Z0-9_\\-]{2,32}$": { "type": "number", "minimum": 0, "maximum": 1 }
+      "properties": {
+        "tutor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "publisher": { "type": "number", "minimum": 0, "maximum": 1 },
+        "student": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     }
   }
@@ -251,9 +251,9 @@ sequenceDiagram
 
 Field semantics — PromptRefinementInput
 
-- goal: Human-stated learning objective. Must be specific enough to scope the plan; min 8 chars. Producer: user. Consumer: Prompt Refinement Service (PRS). Used to seed the curriculum template.
-- contextRefs: Optional anchor materials (vault-relative note paths or external URIs) that the PRS may consult or reference. Capped to 8 to reduce drift and latency.
-- lensWeights: Objective weightings per lens key (e.g., tutor, publisher, student). Values ∈ [0,1]; UI should normalize to sum≈1 though schema does not enforce sum. Used to bias the refinement output.
+- goal: Human-stated learning objective. Must be specific enough to scope the plan; min 8 chars.
+- contextRefs: Optional anchor materials; max 8.
+- weights: Objective weightings (tutor, publisher, student) in [0,1]. UI should normalize; schema does not enforce sum.
 
 #### 3.0.2 `RefinedPromptV1`
 
@@ -554,6 +554,9 @@ Field semantics — StudyPlanV1
 - **ADR-006 Undo Model:** Bundle-aware inverse ops with precondition checks; consequence: safe, bounded complexity.  
 - **ADR-007 Offline Queueing:** Not supported; consequence: simpler invariants, clearer UX.  
 - **ADR-008 Desktop Shell:** Deferred; consequence: keep web server simplicity; revisit for OS keychain integration.
+- **ADR-009 UI CSR for interactive panes:** Refinement/Proposal panes are client-only (CSR) to mitigate hydration issues introduced by browser extensions and dynamic input state.  
+- **ADR-010 API env loading:** API loads secrets from `.env.local` via `dotenv`; UI never reads secrets. CORS allows `http://localhost:4000` during dev.  
+- **ADR-011 Contract key alignment:** Use `weights` (not `lensWeights`) for PromptRefinementInput across API/UI.
 
 ---
 

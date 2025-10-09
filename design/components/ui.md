@@ -1,5 +1,45 @@
 # UI (Next.js/React)
 
+## Implementation Notes (v0.1.1)
+
+- Component colocation and structure
+  - Next.js App Router under `ui/app/`; shared UI components under `ui/components/`.
+  - Panes: `ui/components/RefinementPane.tsx`, `ui/components/ProposalPane.tsx`.
+  - Contract types remain single source of truth in `src/contracts/types` and are imported as type-only in UI to avoid bundling server code.
+
+- Navigation and routing
+  - Use `next/link` for SPA navigation (no raw `<a href>`). Home links route to `/refine` and `/proposal`.
+
+- Hydration/SSR policy
+  - Refinement and Proposal panes are loaded client-only via `next/dynamic(..., { ssr: false })` to avoid hydration drift from browser extensions (e.g., password managers) and non-deterministic client state.
+  - Additional mitigations: `suppressHydrationWarning` on pane roots; inputs have `autoComplete/autoCorrect/autoCapitalize` disabled and `spellCheck={false}`.
+
+- API integration
+  - UI calls local API with `NEXT_PUBLIC_API_BASE` (defaults to `http://localhost:3030`).
+  - Endpoints wired:
+    - POST `/refine` → `{ refinedPrompt, studyPlan }`
+    - POST `/proposal` → `{ proposal }`
+  - Env: create `ui/.env.local` with `NEXT_PUBLIC_API_BASE=http://localhost:3030`.
+  - CORS: API allows origin `http://localhost:4000`.
+
+- Contract-first payloads
+  - Refinement (client → API):
+    - Body: `{ goal: string, contextRefs?: string[], weights?: { tutor, publisher, student } }`
+    - Notes: `weights` is the schema key (was previously referred to in UI as lensWeights).
+  - Proposal (client → API):
+    - Body: `{ prompt?: string, refined_text?: string }` (UI normalizes input and sends one of these).
+
+- Testing and dev ergonomics
+  - Vitest environments split: Node for backend tests; `happy-dom` only for `tests/ui/**` via `environmentMatchGlobs`.
+  - jest-dom matchers registered via ESM-safe namespace import in `tests/setup.ts`.
+  - UI tests use role-based queries (`getByRole`, `findByRole`) to avoid ambiguous text matches.
+
+- Launch and scripts
+  - API dev: `npm run dev` (loads server `.env.local` with secrets; UI never loads secrets).
+  - UI dev: `npm run ui` (Next.js on port 4000).
+
+---
+
 ## Purpose & Responsibilities
 
 Provide an accessible, local-first web interface that orchestrates the end-to-end KMV Console flows with clarity, predictability, and auditability.
@@ -372,3 +412,57 @@ Audit & Settings
 | requirements.md §4 Performance | Observability & UX Metrics | p50/p90 asserted via tests |
 | system-design.md §2.3 Refinement | Prompt Refinement | refined_text handoff to Proposal |
 | system-design.md §2.3 Proposal | Proposal Viewer | Proposal schema + hashing communicated |
+
+---
+
+### Prompt Refinement (API contract alignment)
+
+- POST `/refine` payload (UI → API):
+  - `{ goal: string, contextRefs?: string[], weights?: { tutor, publisher, student } }`
+- Client behavior:
+  - Validate min length (goal ≥ 8) and weights in [0,1] before POST.
+  - On success: render StudyPlanV1 and RefinedPromptV1; enable handoff.
+  - On error: render Ajv pointers; allow retry. Avoids `additionalProperties` by strictly sending declared fields only.
+
+### Proposal Viewer (API contract alignment)
+
+- POST `/proposal` payload (UI → API):
+  - `{ prompt?: string, refined_text?: string }` (one must be present; UI normalizes Source Toggle selection).
+- Client behavior:
+  - On success: render ProposalV1 summary and JSON view; (later) diff against inventory.
+  - On error: show schema pointers and remediation hints.
+
+---
+
+## Runtime Configuration
+
+- Server (API)
+  - `.env.local` at repo root (secrets): `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, `OPENAI_TEMPERATURE`, `LOG_LEVEL`, `PORT`.
+  - CORS: allows `http://localhost:4000` (Next dev).
+- UI (Next.js)
+  - `ui/.env.local`: `NEXT_PUBLIC_API_BASE=http://localhost:3030`.
+  - Never expose secrets in UI; only use `NEXT_PUBLIC_*` for non-sensitive values.
+
+---
+
+## Security & Privacy (UI updates)
+
+- No secrets in UI; server holds provider credentials.
+- Inputs sanitized; no logging of sensitive inputs client-side.
+- Client panes rendered client-only to reduce SSR leakage surface; CSP recommended (no inline scripts).
+
+---
+
+## Folder Layout (UI)
+
+- `ui/app/` — pages (`/`, `/refine`, `/proposal`)
+- `ui/components/` — shared React components (RefinementPane, ProposalPane)
+- `ui/lib/api.ts` — fetch helpers to call local API
+- `ui/.env.local` — non-secret UI config (API base)
+
+---
+
+## Known Trade-offs
+
+- Client-only panes defer initial render for those sections but avoid hydration mismatches from extensions and dynamic client state.
+- Contract types are imported as type-only from server workspace to prevent bundling server modules into UI; consider a future shared package for contracts.
